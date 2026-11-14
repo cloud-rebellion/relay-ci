@@ -28,7 +28,7 @@ def results_directory():
             path.stat().st_uid == os.getuid()
             and path.stat().st_mode & 0o777 == 0o700, "scanner-results-directory-not-fresh-private")
     controls = document((path / "scanner-controls-summary.json").read_bytes())
-    require(controls == {"schema": 1, "tests": 38, "failures": 0, "errors": 0, "skips": 0,
+    require(controls == {"schema": 1, "tests": 40, "failures": 0, "errors": 0, "skips": 0,
                          "status": "passed"}, "scanner-closed-controls-not-passed")
     return path
 
@@ -48,6 +48,7 @@ def assess(results, profile):
         finally:
             registry.close()
             (results / "registry-custody-requests.json").write_text(json.dumps(registry.receipts, indent=2) + "\n")
+            (results / "registry-refused-routes.json").write_text(json.dumps(registry.refused_routes, indent=2) + "\n")
         (results / "oci-custody.json").write_text(json.dumps(custody, indent=2) + "\n")
         config = document((work / "oci/blobs/sha256" / profile["image"]["config_digest"][7:]).read_bytes())
         # Derived only from the verified immutable config, never profile-supplied.
@@ -58,6 +59,7 @@ def assess(results, profile):
             tool = validate_tool_manifest(tool_registry, profile["tool"]["reference"])
         finally:
             tool_registry.close()
+            (results / "trivy-registry-refused-routes.json").write_text(json.dumps(tool_registry.refused_routes, indent=2) + "\n")
         (results / "trivy-tool-identity.json").write_text(json.dumps(tool, indent=2) + "\n")
         result = Trivy(daemon, tool, work, results).assess(scan_profile)
         # Attestation and OCI custody survive daemon cleanup. Fixed public image

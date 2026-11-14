@@ -47,7 +47,15 @@ numeric identity is retained in the encrypted diagnostic record. Original run
 activity; original numeric host ownership was not recorded, and no OCI archive
 had been created at that failed stage.
 
-The 38 closed synthetic controls cover digest/size/redirect/subject/trust and
+Refused registry routes retain only a bounded hostname or invalid marker, a
+scheme enum, a validated numeric port or invalid marker, and a credential
+presence boolean in encrypted diagnostics. Raw URL, path, query, auth and
+userinfo values are never retained. The existing exact host gate and
+`registry-host` refusal remain; no request is sent to a denied host. This
+instrumentation does not add a CDN or infer the failed runner's hostname from
+the later Mac probe, which observed an already allowed CloudFront host.
+
+The 40 closed synthetic controls cover digest/size/redirect/subject/trust and
 DB/report refusals, unfixed vulnerabilities, early stop, source/event/storage
 ownership and separate result semantics. They perform no Docker/network call.
 The subject parser accepts at most 32 uniquely named bounded subjects, with

@@ -85,6 +85,46 @@ class ScannerControls(unittest.TestCase):
                 instance._open(url)
         opener.open.assert_not_called()
 
+    def test_refused_route_receipt_is_bounded_and_contains_no_url_or_credentials(self):
+        opener = mock.Mock()
+        instance = registry.Registry("clamav/clamav", opener=opener)
+        instance.token = "synthetic-authorization-do-not-retain"
+        with self.assertRaisesRegex(registry.Refusal, "registry-host"):
+            instance._open("https://usernameSentinel:passwordSentinel@untrusted.example:8443/private-path-sentinel?signed-query-sentinel=opaque", cdn=True)
+        self.assertEqual(instance.refused_routes, [{"hostname": "untrusted.example", "scheme": "https", "port": 8443,
+                                                   "credentials_present": True}])
+        raw = json.dumps(instance.refused_routes)
+        for forbidden in ("usernameSentinel", "passwordSentinel", "private-path-sentinel", "signed-query-sentinel", instance.token, "https://"):
+            self.assertNotIn(forbidden, raw)
+        with self.assertRaisesRegex(registry.Refusal, "registry-host"):
+            instance._open("https://untrusted.example:not-a-port/other?not-retained", cdn=True)
+        self.assertEqual(instance.refused_routes[-1]["port"], "invalid")
+        for _ in range(8):
+            with self.assertRaises(registry.Refusal): instance._open("https://" + "a" * 64 + ".example/path", cdn=True)
+        self.assertEqual(len(instance.refused_routes), 4)
+        self.assertEqual(instance.refused_routes[-1]["hostname"], "invalid")
+        self.assertTrue(all(set(row) == {"hostname", "scheme", "port", "credentials_present"} for row in instance.refused_routes))
+        opener.open.assert_not_called()
+
+    def test_unknown_cdn_stays_refused_without_request_or_bearer_forwarding(self):
+        calls = []
+        def open_request(request, **_):
+            calls.append(request)
+            raise urllib.error.HTTPError(request.full_url, 307, "redirect", {
+                "Location": "https://unknown.cdn.example/blob?signature=synthetic-private-query"}, None)
+        instance = registry.Registry("clamav/clamav", opener=mock.Mock(open=open_request))
+        instance.token = "synthetic-authorization-not-exported"
+        with self.assertRaisesRegex(registry.Refusal, "registry-host"):
+            instance.get("blobs", DIGEST)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].full_url.startswith("https://registry-1.docker.io/v2/clamav/clamav/blobs/"))
+        self.assertIsNotNone(calls[0].get_header("Authorization"))
+        self.assertEqual(registry.CDN_HOSTS, {"production.cloudflare.docker.com", "production.cloudfront.docker.com"})
+        self.assertEqual(instance.refused_routes, [{"hostname": "unknown.cdn.example", "scheme": "https", "port": 443,
+                                                   "credentials_present": False}])
+        self.assertNotIn("signature", json.dumps(instance.refused_routes))
+        self.assertNotIn(instance.token, json.dumps(instance.refused_routes))
+
     def test_blob_redirect_strips_bearer_and_retains_no_signed_url(self):
         calls = []
         def open_request(request, **_):
@@ -540,7 +580,7 @@ def cleanup_fixture():
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(ScannerControls)
     # This closed inventory deliberately changes only with reviewed source.
-    if suite.countTestCases() != 38:
+    if suite.countTestCases() != 40:
         raise SystemExit("Closed scanner control inventory changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     destination = os.environ.get("RELAY_SCANNER_RESULTS_DIR")
@@ -548,7 +588,7 @@ def main():
         (Path(destination) / "scanner-controls-summary.json").write_text(json.dumps({"schema": 1,
             "tests": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
             "skips": len(result.skipped), "status": "passed" if result.wasSuccessful() and not result.skipped else "failed"}) + "\n")
-    if result.skipped or result.testsRun != 38 or not result.wasSuccessful():
+    if result.skipped or result.testsRun != 40 or not result.wasSuccessful():
         raise SystemExit(1)
 
 

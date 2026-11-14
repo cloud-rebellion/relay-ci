@@ -83,13 +83,37 @@ class Registry:
         self.started = time.monotonic()
         self.token = None
         self.receipts = []
+        self.refused_routes = []
+
+    def _refused_route(self, parts):
+        host = parts.hostname or ""
+        fqdn = (len(host) <= 253 and host.isascii() and
+                re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.?", host)
+                and not re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", host))
+        try:
+            port = parts.port
+        except ValueError:
+            port = "invalid"
+        if port is None:
+            port = 443 if parts.scheme == "https" else 80 if parts.scheme == "http" else "invalid"
+        if type(port) is not int or not 1 <= port <= 65535:
+            port = "invalid"
+        if len(self.refused_routes) < 4:
+            self.refused_routes.append({"hostname": host if fqdn else "invalid",
+                "scheme": parts.scheme if parts.scheme in {"http", "https"} else "other",
+                "port": port, "credentials_present": bool(parts.username or parts.password)})
 
     def _open(self, url, *, auth=False, cdn=False):
         parts = urllib.parse.urlsplit(url)
         allowed = CDN_HOSTS if cdn else {"registry-1.docker.io", "auth.docker.io"}
-        require(parts.scheme == "https" and parts.hostname in allowed and
-                not parts.username and not parts.password and parts.port in (None, 443),
-                "registry-host")
+        try:
+            port = parts.port
+        except ValueError:
+            port = "invalid"
+        if not (parts.scheme == "https" and parts.hostname in allowed and
+                not parts.username and not parts.password and port in (None, 443)):
+            self._refused_route(parts)
+            raise Refusal("registry-host")
         self.requests += 1
         require(self.requests <= 48 and time.monotonic() - self.started <= 900,
                 "registry-request-budget")
