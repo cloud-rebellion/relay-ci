@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "source_policy_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+  "go_compiler": "inherit-and-verify-reviewed-ci/github/pins.json-and-production-Dockerfile",
+  "bun_checker": "inherit-and-verify-reviewed-ci/github/pins.json-and-production-Dockerfile",
+  "govulncheck_module": "golang.org/x/vuln/cmd/govulncheck@latest",
+  "govulncheck_origin": "Stage ci_go.go installs @latest in a source-free container. This port records the actual installed binary hash per run and mounts it read-only for scanning.",
+  "accepted_go_advisories": [],
+  "trivy_reference": "aquasec/trivy:latest",
+  "trivy_origin": "Stage security_trivy.go uses latest. This port records pulled descriptor/local ID and uses that exact image ID for both scans; no immutable cross-run scanner pin is claimed.",
+  "trivy_severities": ["CRITICAL", "HIGH"],
+  "trivy_ignore_unfixed": true,
+  "accepted_image_advisories": [],
+  "trivy_max_archive_bytes": 17179869184,
+  "goose_version": "v3.27.1",
+  "goose_runtime_library": "v3.24.3",
+  "rollback_attempts": 3,
+  "rollback_benign_pattern": "no migrations to run|no next version found|no migration found|no previous version|no current version found",
+  "postgres": "inherit-existing-reviewed-isolated-fixture-pin-ci/github/pins.json",
+  "migration_scope": "fresh synthetic database up, last-three down, up replay; not populated-data restoration or production rollback acceptance"
+}

@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "source_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c",
+  "inputs": [
+    {
+      "path": "stage/userworkflows/ci_brightcrm_toolchain.go",
+      "blob": "946ad491ba09a96648a2e951856b072e3f858ec9",
+      "sha256": "f499573ccf595f7c26a275f6d89b17a6b1e0a1c481b4936f976479918d67c213"
+    },
+    {
+      "path": "stage/userworkflows/ci_contract_test.go",
+      "blob": "7916d65c13156b10ea0cd0d641714ba6764354ca",
+      "sha256": "f7b6ad35ef55061698effea5fb3d86049fade64efb6b2b75a5f42db19860d877"
+    },
+    {
+      "path": "stage/userworkflows/ci_coverage_test.go",
+      "blob": "334c4296de5d57da9cc6e44d1884285bae11e1f9",
+      "sha256": "6f5adc3e0422b07cb60cf77a48e663c63386e603387dadc59370c2a8d484d354"
+    },
+    {
+      "path": "stage/userworkflows/ci_go.go",
+      "blob": "a53df912410ccd72cd0d3dcaf402df41720384c7",
+      "sha256": "a90112100b9b77e3d1abd3b2920503258c42d9932b3f91e866491d425654f150"
+    },
+    {
+      "path": "stage/userworkflows/ci_go_toolchain_parity_test.go",
+      "blob": "9ba14c6fd64cfa6a1187912cf88cf27a55e31ecf",
+      "sha256": "b21faca0acc8f8bdf1d2c123712716d73665fe71833ceb8dcfdc31da9a66f4d0"
+    },
+    {
+      "path": "stage/userworkflows/component_impact.go",
+      "blob": "de2999168edd4cdbf354ec6952610d867edc405b",
+      "sha256": "22d03d5f9ab0bda4c09069ec5e03c4e9c2b9037d1c3656a958bd9a16651d6e89"
+    },
+    {
+      "path": "stage/userworkflows/deploy_brightcrm.go",
+      "blob": "c15ddf94c30b80d337b8c47246b079b477e36d1b",
+      "sha256": "08ff60d8c3bea37c1273e8c6986321bf4a7dbf5ab1c27eb6d69934109b2cb83b"
+    },
+    {
+      "path": "stage/userworkflows/product_policy.go",
+      "blob": "1fd28fa14a89ce7301c4507d196829bdb5909f4c",
+      "sha256": "975f55fec1d1328ce95be1e17ba12eed7617860447d094152d71ba5fafa45276"
+    },
+    {
+      "path": "stage/userworkflows/repo_coverage_registry.go",
+      "blob": "7768cfca34cf871b24c9cff239121cd8ad64018e",
+      "sha256": "f0df998f3f76d6e5c0c6496bd6b37cc35bf35ca3e8b35a4097a174340de8c99a"
+    },
+    {
+      "path": "stage/userworkflows/repo_coverage_scope.go",
+      "blob": "f247f0fb805f231cf8fc9597e19d5daec1a27c5a",
+      "sha256": "8bb97e56a7b87935d667d387fc3c59d5731e4ef85aa7dfe6e0727b61bfccdea7"
+    },
+    {
+      "path": "stage/userworkflows/security_coverage_test.go",
+      "blob": "e3baeacf01ec5a1ef0f0b919f4056aa0ed42cc46",
+      "sha256": "7cfa580aef2eff68032bffb624217bf4029ce1e0d665a8abccc3e2533a34532d"
+    },
+    {
+      "path": "stage/userworkflows/security_gate.go",
+      "blob": "21151b95fbcc8cdf25d05c701437da53fab07c87",
+      "sha256": "9e34fe4483f95739f2ec5b0d6893d27cd39492d8f506b5bbaf9287b2800c07a5"
+    },
+    {
+      "path": "stage/userworkflows/security_gate_scan_test.go",
+      "blob": "7ef39be4dd747763a6f07681b4cd09962682b8ff",
+      "sha256": "fa2564239dd4404f5976e39154060ed405a2d66c1309c3a8333ac03b0b02127d"
+    },
+    {
+      "path": "stage/userworkflows/security_trivy.go",
+      "blob": "415c0d1d2312b2ca8dc7a378c59ec00ac759504b",
+      "sha256": "d62990d734f589a42414552f8c419c540f20e419aa08d7c61118c83f74883e93"
+    }
+  ]
+}

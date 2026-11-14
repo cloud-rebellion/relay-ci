@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "go": "1.26.10",
+  "bun": "1.4.3",
+  "images": {
+    "postgres": {
+      "reference": "postgres:16.15-alpine3.24@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685",
+      "origin": "ed303ae36f5c7c8d6bcc9ac61293866d1ab7a207:.github/workflows/hash-ci.yml",
+      "qualification": "New isolated Relay GitHub fixture input, PostgreSQL16 major; no production change or prior Relay qualification claimed"
+    },
+    "redis": {
+      "reference": "redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541",
+      "origin": "ed303ae36f5c7c8d6bcc9ac61293866d1ab7a207:stage/userworkflows/ci_brightcrm_postgres.go"
+    },
+    "alpine_guard": {
+      "reference": "alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507",
+      "origin": "ed303ae36f5c7c8d6bcc9ac61293866d1ab7a207:brightcrm/Dockerfile"
+    },
+    "prometheus_guard": {
+      "reference": "prom/prometheus:v3.4.0",
+      "origin": "ed303ae36f5c7c8d6bcc9ac61293866d1ab7a207:brightcrm/internal/ciguard/guard_cluster_profiles_test.go",
+      "immutable_descriptor_pin": false,
+      "execution_identity": "Existing reviewed version tag; record pulled descriptor/localID before tests, bind alias to that ID. No immutable cross-run digest claim."
+    }
+  },
+  "actions": {
+    "checkout": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+    "setup_go": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
+    "setup_bun": "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+    "upload_artifact": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "origins": {
+    "stage/userworkflows/security_gate.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "21151b95fbcc8cdf25d05c701437da53fab07c87",
+      "source_sha256": "9e34fe4483f95739f2ec5b0d6893d27cd39492d8f506b5bbaf9287b2800c07a5"
+    },
+    "stage/userworkflows/security_gate_scan_test.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "7ef39be4dd747763a6f07681b4cd09962682b8ff",
+      "source_sha256": "fa2564239dd4404f5976e39154060ed405a2d66c1309c3a8333ac03b0b02127d"
+    },
+    "stage/userworkflows/security_gate_log_leak_test.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "63b7f047a1d9ada0b2ee2c996f71ec68f48d932d",
+      "source_sha256": "c653602110a23c13a53f99f38cf0953fd909eec76632a52c355432b6a1f59935"
+    },
+    "stage/userworkflows/security_trivy.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "415c0d1d2312b2ca8dc7a378c59ec00ac759504b",
+      "source_sha256": "d62990d734f589a42414552f8c419c540f20e419aa08d7c61118c83f74883e93"
+    },
+    "stage/userworkflows/security_vulncheck.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "1f2b8db1820ea2e0ee1f78c9c04bef7d8eaacaf4",
+      "source_sha256": "44767bc524f64089d1aa3c394ffa82e810af9abe7e86fc9459538e0e59a5166a"
+    },
+    "stage/userworkflows/ci_go.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "a53df912410ccd72cd0d3dcaf402df41720384c7",
+      "source_sha256": "a90112100b9b77e3d1abd3b2920503258c42d9932b3f91e866491d425654f150"
+    },
+    "stage/userworkflows/migration_rehearsal.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "d4c8b019716965d24acf5a1b4626a1adb42df529",
+      "source_sha256": "c2e3d20486e6a737a4ba25df977f74c34aad025e4defcec775f899c72a74b435"
+    },
+    "stage/workflows/goose_rehearsal.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "74294f69c7a95937a4302ce5fc51cd71599e5c4f",
+      "source_sha256": "4dc3649793533838f350524926452615cb051a28f14b496758e766f38660262a"
+    },
+    "stage/workflows/goosedown.go": {
+      "source_commit": "91f821a3d5895a901569954d2aa50c173582ff13",
+      "source_blob": "8b68ba744943eab5a6926077ae05f22682c50537",
+      "source_sha256": "2f5fc50ff9821a59e01bdc0f956de3982c23fbc13aee3eea193b5cef4c2e5cba"
+    }
+  }
+}

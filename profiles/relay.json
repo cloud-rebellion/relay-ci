@@ -1,0 +1,35 @@
+{
+  "age": {
+    "archive_sha256": "cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10",
+    "binary_sha256": null,
+    "linux_amd64_archive_url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz",
+    "recipient": "age124v20atmxg6n4wf20z7v238mz3e68asqpe83nwmrnxvvsw49yausfdf67d",
+    "version": "1.3.2"
+  },
+  "allowed_workflow_refs": [
+    "refs/heads/main"
+  ],
+  "context_commit": "f9dfed6fc82971dbd736e5e4898b2edd418e836b",
+  "context_manifest_path": "relay-ci-context.json",
+  "context_manifest_sha256": "f9d16a41eb6857354783dd9b9b25744481bf46c95c2c14e36dadce95aaad115e",
+  "context_metadata_paths": [
+    "relay-ci-context.json"
+  ],
+  "context_tree": "185f6f56835ab08cbfc19d05c07290491917abc9",
+  "execution_roots": [
+    "brightcrm",
+    "ops"
+  ],
+  "github_ssh_host_key_source": "https://api.github.com/meta",
+  "github_ssh_known_hosts": "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n",
+  "github_ssh_known_hosts_sha256": "6233fddbb0a29afc8c4e8c699733c1a188c3a41f2fb63a2640653dc4aea624ce",
+  "origin_stage_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c",
+  "private_repository": "cloud-rebellion/relay",
+  "private_repository_id": 1447574877,
+  "public_repository": "cloud-rebellion/relay-ci",
+  "public_repository_id": 1457664829,
+  "schema": 1,
+  "source_bytes": 21721363,
+  "source_entry_count": 2059,
+  "status": "pinned"
+}

@@ -1,0 +1,395 @@
+{
+  "version": 1,
+  "qualified_source_commit": "6fc1ee5dd0cb1449f63a39a2748a60faa431e1c1",
+  "expectedTests": 97,
+  "cases": [
+    {
+      "file": "auth-loading.spec.ts",
+      "title": "anonymous root reaches login without a stuck spinner"
+    },
+    {
+      "file": "auth-loading.spec.ts",
+      "title": "authenticated-layout bootstrap can retry a transient failure"
+    },
+    {
+      "file": "auth-loading.spec.ts",
+      "title": "stalled root bootstrap times out and retry reaches login"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "a late accepted edit cannot populate a different card or clear its composer"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "a lost delete reply retains its target and checks canonical rows before another change"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "a retained reply draft stays visible when refresh fails or its original target disappears"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "an administrator can use the existing moderation action on another author comment"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "an unconfirmed committed post keeps its draft and requires canonical review without replay"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "campaign dialer notes show unavailable values and retain admin moderation scope"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "campaign dialer notes show unavailable values and retain owner moderation scope"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "hidden values are unavailable, readable partial source labels and every orphan/nested row remain visible"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "late failures after returning to the same card cannot unlock a newer pending post or show stale notices"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "malformed create and delete success bodies remain unconfirmed instead of acknowledging a write"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "pending moderation captures its target and cannot dismiss or delete a second row"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "pending posts and replies freeze every comment action and preserve the exact submitted draft"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "replying to a related nested row uses its actual thread and flattened display root"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "the complete authorized related union is paged without independent label rediscovery"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "unchanged content sends no patch; failed or wrong-id responses retain the draft for retry"
+    },
+    {
+      "file": "comment-field-policy.spec.ts",
+      "title": "write-only content requires explicit replacement and keeps a single pending exact-format save"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "a failed save and wrong canonical identity retain a retryable draft, then adopt the matching canonical record"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "closing during private CSRF preflight prevents a late patch before another company is edited"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "closing during private retry CSRF preflight prevents a late patch before another company is edited"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "employee count uses real integer zero, clear and int32 boundaries without sending fractional or negative edits"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "intentional optional clears send null and the accepted empty record reopens as a no-op baseline"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "no-op and reverted drafts make no request while readable names and nonempty email retain validation"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "null and omitted fields stay unchanged during an unrelated edit, and an explicitly supplied name updates alone"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "pending edits reject duplicate submission and a cancelled late reply cannot alter the current company card"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "the real guarded API client retries one403 with exactly the same changed-field body"
+    },
+    {
+      "file": "company-edit-patch.spec.ts",
+      "title": "unrelated edits preserve legacy count and email while intentional notes keep exact formatting"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "a failed save retains the draft and stable baseline for retry, then uses the canonical server record"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "an explicitly selected company and formerly unavailable booleans send exact ids and chosen values"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "anonymization keeps retained and unclassified delivery review visibly open"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "closing during the private CSRF preflight prevents a late patch before another card is edited"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "closing during the private retry CSRF preflight prevents a late patch before another card is edited"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "completed contact save remains terminal when current read is denied"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "intentional readable clears send null and explicit boolean transitions preserve false membership"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "malformed contact canonical keeps its original intent until explicit replay recovery"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "no-op and reverted drafts make no request while readable names and nonempty email keep validation"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "pending edits lock duplicate submission and stale completion after closing a card cannot alter another card"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "the actual API client CSRF retry replays the same changed-field body once"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "unavailable null and omitted fields stay untouched while a readable phone and an explicitly entered name can be edited"
+    },
+    {
+      "file": "contact-edit-patch.spec.ts",
+      "title": "unknown contact save retries the original intent and retires only its unchanged draft"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "changed retired selections reject honestly while untouched legacy choices remain preserved"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "create includes only explicitly supplied custom keys"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "editing one visible field preserves masked and unlisted stored values"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "empty text, boolean false and numeric zero remain explicit values"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "explicit blind replacements and per-key clear do not require read access"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "failed and mismatched responses keep the draft; pending save is single and frozen"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "inactive fields remain read only and unknown nested numeric siblings are never echoed"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "late accepted write cannot replace another open record or its draft"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "list opens the card without inline editing and renders unknown values honestly"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "multi-select preserves current options and sends arrays or an explicit null clear"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "name length accepts 255 Unicode code points and blocks 256"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "no-op and reverted values send no patch"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "number edits send lossless numeric JSON and adopt the exact canonical response"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "pending delete captures one record and blocks competing writes"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "prototype and constructor custom keys remain own editable values in actual forms"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "raw custom numbers render exact integers fractions and exponents in the list and card"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "required clear keeps the draft and Undo permits an unrelated blind replacement"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "required create preflight permits false zero and whitespace and omits inactive requirements"
+    },
+    {
+      "file": "custom-record-changed-patch.spec.ts",
+      "title": "schema rejection retains exact create drafts and retry bytes with optional omission"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "a stage response replaces optimistic fields, duplicate pending moves stop, and a denied move restores a neutral card"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "independently hidden fields preserve neutral cards and known terminal outcomes without guessed stages"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "initial denied and quiet failed pipeline reads hide totals and retry a fresh snapshot"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "missing FX rates stay unavailable while a same-currency subset remains measurable"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "readable values retain concrete FX totals, weighted totals and known closed rows"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "search uses readable labels and a hidden title can still open its own card without entity writes"
+    },
+    {
+      "file": "deals-null-presentation.spec.ts",
+      "title": "unavailable money never becomes USD or zero and its currency filter stays separate from real currencies"
+    },
+    {
+      "file": "invitation-branding.spec.ts",
+      "title": "Relay existing identity invitation accepts an encoded padded token and reaches sign in"
+    },
+    {
+      "file": "invitation-branding.spec.ts",
+      "title": "Relay expired invitation displays the failure without an acceptance form"
+    },
+    {
+      "file": "invitation-branding.spec.ts",
+      "title": "Relay new identity invitation accepts an encoded padded token and reaches sign in"
+    },
+    {
+      "file": "leads-null-temperature.spec.ts",
+      "title": "mixed and server-filtered lead pages retain every returned row in its own displayed group"
+    },
+    {
+      "file": "leads-null-temperature.spec.ts",
+      "title": "neutral rows preserve active filters, request paging and server count clamping"
+    },
+    {
+      "file": "leads-null-temperature.spec.ts",
+      "title": "stale lead responses cannot replace current neutral results or turn unavailable into empty"
+    },
+    {
+      "file": "leads-null-temperature.spec.ts",
+      "title": "unknown temperatures remain neutral, selectable and collapsible without opening or writing a lead"
+    },
+    {
+      "file": "nullable-contact-labels.spec.ts",
+      "title": "a contact pipeline keeps readable lead identity fallbacks and opens each linked lead without writes"
+    },
+    {
+      "file": "nullable-contact-labels.spec.ts",
+      "title": "company primary-contact breadcrumb and linked-contact rows open the exact neutral or partial contact"
+    },
+    {
+      "file": "nullable-contact-labels.spec.ts",
+      "title": "contact cards, selection labels and detail names preserve partial names without using email as a name"
+    },
+    {
+      "file": "nullable-contact-labels.spec.ts",
+      "title": "deal relationship body and breadcrumb retain neutral and partial contact labels with real read navigation"
+    },
+    {
+      "file": "nullable-contact-labels.spec.ts",
+      "title": "lead lists, details and contact selection preserve truthful labels and readable dates without writes"
+    },
+    {
+      "file": "private-request-custody.spec.ts",
+      "title": "CSV private preflight and response custody block account change without stale retry"
+    },
+    {
+      "file": "private-request-custody.spec.ts",
+      "title": "audit CSV body custody blocks organization change and rejects stale effects"
+    },
+    {
+      "file": "private-request-custody.spec.ts",
+      "title": "quote PDF card ABA retains the current download owner through body settlement"
+    },
+    {
+      "file": "scheduled-report-authority.spec.ts",
+      "title": "a late row mutation cannot replace a refreshed report and its delayed refresh stops after navigation"
+    },
+    {
+      "file": "scheduled-report-authority.spec.ts",
+      "title": "an administrator can manage another same-team owner without granting foreign-team controls"
+    },
+    {
+      "file": "scheduled-report-authority.spec.ts",
+      "title": "ordinary owners can request and delete their active report while paused and foreign controls stay disabled"
+    },
+    {
+      "file": "scheduled-report-authority.spec.ts",
+      "title": "queued and legacy report statuses never claim delivery or display raw historical counts and errors"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "developer role cannot load or mutate administrator website pairing"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "uncertain website redemption is never replayed and a fresh status is required after refresh"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "uncertain website sync start, batch and cancellation require fresh saved progress without automatic replay or a new request id"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website challenge preflight and non-idempotent response retain raw session custody through account change"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website pairing preserves a newer challenge draft and separates prepare, pending approval, status and local disable"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website receipts distinguish no-session, duplicate, local noop and uncertainty while revision fences prevent false resync repair"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website sync batch response retains physical session custody and never auto-advances after account change"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website sync closed metadata rejects foreign scope, private fields and unsafe counters before any operator write"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website sync refuses uncorrelated batch progress and pauses capacity failures until explicit fresh-status resume"
+    },
+    {
+      "file": "website-pairing.spec.ts",
+      "title": "website synchronization queues current linked identities in explicit user-owned batches and pauses without claiming delivery"
+    }
+  ]
+}

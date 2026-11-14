@@ -1,0 +1,71 @@
+name: Relay private-source qualification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Relay / ${{ matrix.gate }}
+    if: github.repository == 'cloud-rebellion/relay-ci' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gate: core
+            timeout: 120
+          - gate: voip
+            timeout: 35
+          - gate: source-security
+            timeout: 45
+          - gate: go-vulnerabilities
+            timeout: 60
+          - gate: final-image
+            timeout: 75
+          - gate: migrations
+            timeout: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.3'
+      - name: Prepare private temporary diagnostic directory
+        shell: bash
+        run: |
+          umask 077
+          relay_results_dir="$RUNNER_TEMP/relay-private-${{ matrix.gate }}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir "$relay_results_dir"
+          echo "RELAY_CI_RESULTS_DIR=$relay_results_dir" >> "$GITHUB_ENV"
+          echo "RELAY_PRIVATE_SOURCE_ROOT=$GITHUB_WORKSPACE/private-source/brightcrm" >> "$GITHUB_ENV"
+      - name: Fetch only the pinned private source with repository-scoped read access
+        env:
+          RELAY_SOURCE_READ_KEY: ${{ secrets.RELAY_SOURCE_READ_KEY }}
+        run: python3 -B tooling/fetch-private.py
+      - name: Run the complete selected gate with private diagnostic capture
+        run: python3 -B tooling/run-gate.py '${{ matrix.gate }}'
+      - name: Encrypt original diagnostics and validate the public summary
+        if: always()
+        run: python3 -B tooling/seal-reports.py '${{ matrix.gate }}'
+      - name: Retain only ciphertext and the allowlisted public summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay-${{ matrix.gate }}-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/relay-sealed-${{ matrix.gate }}/${{ matrix.gate }}-diagnostics.tar.gz.age
+            ${{ runner.temp }}/relay-sealed-${{ matrix.gate }}/public-summary.json

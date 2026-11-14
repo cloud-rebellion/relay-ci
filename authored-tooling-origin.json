@@ -1,0 +1,138 @@
+{
+  "inputs": [
+    {
+      "source_blob": "99a705f282c07021c4bee9366db7c6573aee848d",
+      "source_path": "brightcrm/ci/github/browser-cases.json",
+      "source_sha256": "cdd60728bd1231cb0f49fa6620f9a4a79553efb3259af119814562652e34b1ea",
+      "target_path": "tooling/github/browser-cases.json"
+    },
+    {
+      "source_blob": "6e5cf3d7f8560f689b59f05ca35039eec9f9f5aa",
+      "source_path": "brightcrm/ci/github/common.py",
+      "source_sha256": "a658e3736d1ad2859a5d18fa00ddda32b6e236fb0657144e3d8636afd88008ab",
+      "target_path": "tooling/github/common.py"
+    },
+    {
+      "source_blob": "b95e7fe23c671c2e53fc8bae899675b25bf2713f",
+      "source_path": "brightcrm/ci/github/pins.json",
+      "source_sha256": "4714d958767d06ee559db1c600dab6df28fe8592cf0f6f39b420f6a2775eb65f",
+      "target_path": "tooling/github/pins.json"
+    },
+    {
+      "source_blob": "dfd9ed399f86963efba8db3e2922d44fae2dcb63",
+      "source_path": "brightcrm/ci/github/run-backend.py",
+      "source_sha256": "626a760fb73350642c62f6d6ebe2d188072f0685d4c1f0e226b46d65a4721f61",
+      "target_path": "tooling/github/run-backend.py"
+    },
+    {
+      "source_blob": "3630e1c945c9a940abf644606be7229f341504dd",
+      "source_path": "brightcrm/ci/github/run-frontend.py",
+      "source_sha256": "6e9e4fa4e6552fb0d6084a12d00609c8229454507f9f0e2c196d857320fb2b1c",
+      "target_path": "tooling/github/run-frontend.py"
+    },
+    {
+      "source_blob": "cc0c21795541ef74fb84bfd96d7b5e7fa822f768",
+      "source_path": "brightcrm/ci/github/run-voip.py",
+      "source_sha256": "7fcdfd10d2213bed146d6e22b9ce97618446050e3ad26d3a96c5d8cd126fb8c8",
+      "target_path": "tooling/github/run-voip.py"
+    },
+    {
+      "source_blob": "b8768e6086cd8c53a3e76a0184d46dd460400f2d",
+      "source_path": "brightcrm/ci/github/validate-browser-results.py",
+      "source_sha256": "4ca3e84c14e57d54ac7cdf4167888223f3721562c2b62e6ab3f0dffcd565df68",
+      "target_path": "tooling/github/validate-browser-results.py"
+    },
+    {
+      "source_blob": "82cb6924b7314378429727ff8190625b41eba69c",
+      "source_path": "brightcrm/ci/github/validate-go-results.py",
+      "source_sha256": "96a90a509b9b29b2a094d02f328a927e2964cab0b43dd004b6d3393f99581435",
+      "target_path": "tooling/github/validate-go-results.py"
+    },
+    {
+      "source_blob": "bffe1d32d2c6673e8c607c0b0fa916efc10b65f2",
+      "source_path": "brightcrm/ci/github/validators_test.py",
+      "source_sha256": "893d83e9080f93e7c845c5367e64252417847847ee40edeed1e9478d6331aa23",
+      "target_path": "tooling/github/validators_test.py"
+    },
+    {
+      "source_blob": "4fcb2ad127ba54c98c7e7fc77a1598cf8927b796",
+      "source_path": "brightcrm/ci/release/common.py",
+      "source_sha256": "e6654b8a8947eed088d5f257b7d1d8e8d85ed03613fbb8d777946af4351d2110",
+      "target_path": "tooling/release/common.py"
+    },
+    {
+      "source_blob": "8f270a5f846c2ed8a40edde70794dc44e0120cb3",
+      "source_path": "brightcrm/ci/release/goose-down.sh",
+      "source_sha256": "6401447be101198b986e5174462b7934c73e7d942e91737736be19e365b8a84d",
+      "target_path": "tooling/release/goose-down.sh"
+    },
+    {
+      "source_blob": "64f453fd7a58ba942e8bbdc9a4a2d147a5d492bd",
+      "source_path": "brightcrm/ci/release/policy.json",
+      "source_sha256": "c23f7f124d3708f4e5e0ea1dfacc56448a831d1b0a479330c0999d00402fd969",
+      "target_path": "tooling/release/policy.json"
+    },
+    {
+      "source_blob": "77419e8a967674d5cc35487aa411e6f13cf9943f",
+      "source_path": "brightcrm/ci/release/release_tests.py",
+      "source_sha256": "ceb8fb6dbe85a96243359fa5fe761fe4647c0a5c4689e17d3aaa36c894a37b2f",
+      "target_path": "tooling/release/release_tests.py"
+    },
+    {
+      "source_blob": "19e32cd339ae2d71abaf3ed269fcbd4fdeb3c04e",
+      "source_path": "brightcrm/ci/release/run-image-scan.py",
+      "source_sha256": "d26d4fd42a1c44cf0e21ca24df280027b75dbeeec8470263e5504bbaa9e0e602",
+      "target_path": "tooling/release/run-image-scan.py"
+    },
+    {
+      "source_blob": "89c6ece4be79a5f78894b1ebbcccd50b1289c618",
+      "source_path": "brightcrm/ci/release/run-migration.py",
+      "source_sha256": "607cc215e36a74e3b053ad384042a0ac95460509eebc6baa25b954529f564b78",
+      "target_path": "tooling/release/run-migration.py"
+    },
+    {
+      "source_blob": "b6e627726e7b9067ba580bdaa1d9b5db28337d8d",
+      "source_path": "brightcrm/ci/release/run-security.py",
+      "source_sha256": "4a8076cb3bf1bcc8c15a552ab58c0b8780f1ff11828039e98e2e8e1556f00c72",
+      "target_path": "tooling/release/run-security.py"
+    },
+    {
+      "source_blob": "867c360fa701a7b57538d69db0f0a489851ce37d",
+      "source_path": "brightcrm/ci/release/run-vulncheck.py",
+      "source_sha256": "d0fbf91a858503eddb0bf1f6bf508716f124397fccc4ee5bec547de0f4a76c08",
+      "target_path": "tooling/release/run-vulncheck.py"
+    },
+    {
+      "source_blob": "f7b1ef88852a95e92dff9a04649eca3be778747d",
+      "source_path": "brightcrm/ci/release/source-origin.json",
+      "source_sha256": "6691b5e99aec3357c2f3bdbf30ba1e1f10e0ed4b1d686c115bf3890cebef4762",
+      "target_path": "tooling/release/source-origin.json"
+    },
+    {
+      "source_blob": "fcfd51a59b843c446422fb8369b9a969911a3672",
+      "source_path": "brightcrm/ci/release/source-scan/main.go",
+      "source_sha256": "304f9e5e8d8226c3cfdefdeb0f764b15acf35944f5c7d04e10c6d8b2d14bfc23",
+      "target_path": "tooling/release/source-scan/main.go"
+    },
+    {
+      "source_blob": "d8a9978fc9a70c375017ab12b11dc0cddb5a5e4f",
+      "source_path": "brightcrm/ci/release/source-scan/main_test.go",
+      "source_sha256": "c62b10c3f926e36cb99038f5225da3a9b54178f66b025d3cb31fbd169ecc200f",
+      "target_path": "tooling/release/source-scan/main_test.go"
+    },
+    {
+      "source_blob": "0630e9c282eeb99d023e578c1ffdce84ebb614bb",
+      "source_path": "brightcrm/ci/release/source-scan/source_policy.go",
+      "source_sha256": "c3c45b030b86a5be7fab9c31cb9e7b447d57b32fc989f86d65bd62bef8bec62e",
+      "target_path": "tooling/release/source-scan/source_policy.go"
+    },
+    {
+      "source_blob": "c1478ac6892588f20043a83f3984693b12c44be9",
+      "source_path": "brightcrm/ci/release/source-scan/source_policy_test.go",
+      "source_sha256": "7744f40a46c920a1cd8674b78d7e64d17a9e531ca6715870ef351f0beda1cd3a",
+      "target_path": "tooling/release/source-scan/source_policy_test.go"
+    }
+  ],
+  "kind": "authored validation tooling only; not app or private Stage/ops source",
+  "source_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c"
+}

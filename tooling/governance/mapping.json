@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "source_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c",
+  "scope": "ordinary durable Relay product partition; native platform/estate checks remain separate",
+  "selection": {
+    "native_registry": "stage/userworkflows/ci_go.go:repoCoverageGuardTests/repoCoverageGuardOwners",
+    "native_scope": "stage/userworkflows/repo_coverage_scope.go:selectRepoCoverageGuardTests/repoCoverageSubjectRoots/repoCoverageProductGuardApplies",
+    "native_facets": "stage/userworkflows/product_policy.go:CompiledProductFacetTargets",
+    "native_ownership": "stage/userworkflows/component_impact.go:componentDefinitions/AllowedPathGlobsForProgram",
+    "portable": "selectedGuards/readPolicy; exact fourteen-input source hash closure; no native source execution",
+    "owned_roots": ["brightcrm"],
+    "selected_guard_count": 10
+  },
+  "assertions": [
+    {"name":"TestCIScriptsCannotSilentlyPass","source":"stage/userworkflows/ci_contract_test.go","portable":"runGuards[0]","semantics":"Optional owned ci.sh, linewise # comment stripping, exact ) && echo or } && echo false-green shape"},
+    {"name":"TestEveryDeployedImageIsTrivyScanned","source":"stage/userworkflows/security_coverage_test.go","portable":"runGuards[1]","semantics":"Native push-deploy discovery does not include manual Relay. Portable additional assertion requires reviewed manual DeploySpec, root Dockerfile and Relay membership from security_trivy.go; actual scan belongs to separate required final-image job. Unrelated estate registrations/nonempty discovery are not claimed"},
+    {"name":"TestEveryGoModuleIsGatedOrExempt","source":"stage/userworkflows/ci_coverage_test.go","portable":"runGuards[2]","semantics":"Top-level owned go.mod must be in ciGoServices or carry nonempty ciGoExempt reason; nested VoIP independently executed"},
+    {"name":"TestEveryPublishableProductHasCI","source":"stage/userworkflows/ci_contract_test.go","portable":"runGuards[3]","semantics":"Owned nonexempt split-public-repo.sh presence requires both scripts/ci.sh and .github/workflows/ci.yml; absent app publisher explicitly reported"},
+    {"name":"TestCIGoExemptOnlyNamesRealModules","source":"stage/userworkflows/ci_coverage_test.go","portable":"runGuards[4]","semantics":"Each exemption within owned root must have go.mod; no Relay exemption explicitly reported"},
+    {"name":"TestServiceDockerfilesMatchScanToolchain","source":"stage/userworkflows/ci_go_toolchain_parity_test.go + ci_brightcrm_toolchain.go","portable":"compilerParity/toolchainFromModule/dockerInstructions","semantics":"Exact Relay module/go/toolchain; reviewed1.26.7/1.26.9/1.26.10 compiler; bounded all-Dockerfile inventory; literal FROM grammar, base families, aliases, digests, continued RUN and heredoc refusal; every Go builder equals selected compiler"},
+    {"name":"TestCIScriptsRunRaceWhereCIGoDoes","source":"stage/userworkflows/ci_contract_test.go:observeRaceParityScript/raceParityE2E","portable":"runGuards[6]","semantics":"Optional local script; exact adjacent go or go_release test with exact ./... and -race; exact e2e exclusion; scoped real/stale/unreachable race-debt semantics"},
+    {"name":"TestSecurityGateProductionRootsHaveNoHardcodedProviderCredentialShapes","source":"stage/userworkflows/security_gate_scan_test.go + security_gate.go","portable":"runGuards[7]/scan","semantics":"Owned production root only; exact private provider regexp, includes and fixture exclusions; same legacy scan limits; locations only"},
+    {"name":"TestSecurityGateRepositoryHasNoHardcodedServiceCredentials","source":"stage/userworkflows/security_gate_scan_test.go + security_gate.go","portable":"runGuards[8]/credentialHits/literalCredential","semantics":"Exact private contextual regex/capture/minimum data; candidate-only placeholder classification; same owned roots, includes/exclusions/walker limits; locations only"},
+    {"name":"TestOperationalScriptsRequireExternalCredentials","source":"stage/userworkflows/security_gate_scan_test.go","portable":"runGuards[9]","semantics":"Only the explicit brightcrm credential case: exact sibling ops/scripts/nocodb-to-espocrm-import.py must contain required os.environ ESPOCRM_API_KEY access"}
+  ],
+  "independent_required_lanes": ["core backend race/build/vet and real PostgreSQL invitation lifecycle", "frontend checks and rendered browser acceptance", "nested VoIP Go", "whole selected brightcrm+ops source security", "Go dependency vulnerabilities", "final image Trivy", "isolated migration rehearsal"],
+  "no_claims": ["native Stage Go package execution", "Stage run/check receipts", "whole-estate registration coverage", "production rollback safety", "runtime or live invitation acceptance"]
+}
