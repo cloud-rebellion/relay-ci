@@ -11,6 +11,14 @@ import tempfile
 from binding import HARNESS, load_profile
 
 
+def git_process(command, *, cwd, env, stdout, stderr, normal_checkout=False):
+    # Ordinary Git modes are required by non-root container consumers. The
+    # containing checkout/.git directories and the deploy-key directory stay
+    # private; only the working tree checkout uses the normal file umask.
+    return subprocess.run(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr,
+                          timeout=240, umask=0o022 if normal_checkout else 0o077)
+
+
 def main():
     os.umask(0o077)
     profile = load_profile()
@@ -38,14 +46,17 @@ def main():
         env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR") if k in os.environ}
         env.update(GIT_SSH_COMMAND=" ".join(shlex.quote(x) for x in ssh),
                    GIT_TERMINAL_PROMPT="0", GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
-        commands = [(["git", "init", "--quiet", str(destination)], HARNESS),
-                    (["git", "remote", "add", "origin", "git@github.com:" + profile["private_repository"] + ".git"], destination),
-                    (["git", "-c", "protocol.version=2", "fetch", "--no-tags", "--depth=1", "origin", profile["context_commit"]], destination),
-                    (["git", "-c", "advice.detachedHead=false", "checkout", "--detach", "--quiet", profile["context_commit"]], destination)]
+        commands = [(["git", "init", "--quiet", str(destination)], HARNESS, False),
+                    (["git", "remote", "add", "origin", "git@github.com:" + profile["private_repository"] + ".git"], destination, False),
+                    (["git", "-c", "protocol.version=2", "fetch", "--no-tags", "--depth=1", "origin", profile["context_commit"]], destination, False),
+                    (["git", "-c", "advice.detachedHead=false", "checkout", "--detach", "--quiet", profile["context_commit"]], destination, True)]
         with (results / "private-fetch.stdout").open("w") as stdout, (results / "private-fetch.stderr").open("w") as stderr:
-            for command, cwd in commands:
-                if subprocess.run(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=240).returncode:
+            for command, cwd, checkout in commands:
+                if git_process(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr,
+                               normal_checkout=checkout).returncode:
                     raise RuntimeError("Exact private source could not be fetched")
+        destination.chmod(0o700)
+        (destination / ".git").chmod(0o700)
     # The deploy-key file has been removed before any app-controlled process.
 
 

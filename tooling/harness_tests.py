@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -20,6 +22,8 @@ def load(name):
 
 
 seal = load("seal-reports")
+fetch = load("fetch-private")
+gate = load("run-gate")
 
 
 class Fixture(unittest.TestCase):
@@ -207,6 +211,85 @@ class Diagnostics(Fixture):
         (self.results / "gate-execution.json").write_text(json.dumps(raw))
         with mock.patch.object(seal, "HARNESS", self.harness), mock.patch.dict(os.environ, {"GITHUB_SHA": self.g, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}):
             with self.assertRaises(RuntimeError): seal.safe_summary(self.profile, "core", self.results)
+
+
+class ProcessPermissions(Fixture):
+    def test_real_git_checkout_preserves_modes_inside_private_root_and_removes_key(self):
+        source = self.harness / "local-source"
+        source.mkdir(); self.command(source, "init", "--quiet")
+        config = source / "brightcrm/deploy/cluster/prometheus.yml"
+        config.parent.mkdir(parents=True); config.write_text("global: {}\n"); config.chmod(0o644)
+        executable = source / "brightcrm/synthetic-tool.sh"
+        executable.write_text("#!/bin/sh\nexit 0\n"); executable.chmod(0o755)
+        self.commit(source); commit = self.command(source, "rev-parse", "HEAD").strip()
+        harness = self.harness / "fetch-harness"; harness.mkdir(mode=0o700)
+        runner = self.harness / "runner"; runner.mkdir(mode=0o700)
+        results = runner / "diagnostics"
+        hosts = "github.com ssh-ed25519 synthetic-public-host-identity\n"
+        profile = {"private_repository": "cloud-rebellion/relay", "context_commit": commit,
+                   "github_ssh_known_hosts": hosts,
+                   "github_ssh_known_hosts_sha256": hashlib.sha256(hosts.encode()).hexdigest()}
+        actual_run = subprocess.run
+        def local_git(command, **kwargs):
+            command = list(command)
+            if command[:4] == ["git", "remote", "add", "origin"]:
+                self.assertEqual(command[-1], "git@github.com:cloud-rebellion/relay.git")
+                command[-1] = str(source)
+            if "checkout" in command:
+                keys = list(runner.glob("relay-read-key-*"))
+                self.assertEqual(len(keys), 1)
+                self.assertEqual(stat.S_IMODE(keys[0].stat().st_mode), 0o700)
+                for name in ["key", "known_hosts"]:
+                    self.assertEqual(stat.S_IMODE((keys[0] / name).stat().st_mode), 0o600)
+            return actual_run(command, **kwargs)
+        env = {"RUNNER_TEMP": str(runner), "RELAY_CI_RESULTS_DIR": str(results),
+               "RELAY_SOURCE_READ_KEY": "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic-only-never-used-for-network\n"}
+        previous = os.umask(0o077)
+        try:
+            with mock.patch.object(fetch, "HARNESS", harness), mock.patch.object(fetch, "load_profile", return_value=profile), \
+                    mock.patch.object(fetch.subprocess, "run", side_effect=local_git), mock.patch.dict(os.environ, env):
+                fetch.main()
+            private = harness / "private-source"
+            self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((private / ".git").stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((private / "brightcrm/deploy/cluster/prometheus.yml").stat().st_mode), 0o644)
+            self.assertEqual(stat.S_IMODE((private / "brightcrm/synthetic-tool.sh").stat().st_mode), 0o755)
+            self.assertEqual((private / "brightcrm/deploy/cluster/prometheus.yml").read_bytes(), config.read_bytes())
+            self.assertEqual(self.command(private, "rev-parse", "HEAD").strip(), commit)
+            self.assertEqual(stat.S_IMODE(results.stat().st_mode), 0o700)
+            for name in ["private-fetch.stdout", "private-fetch.stderr"]:
+                self.assertEqual(stat.S_IMODE((results / name).stat().st_mode), 0o600)
+            self.assertEqual(list(runner.glob("relay-read-key-*")), [])
+        finally:
+            os.umask(previous)
+
+    def test_real_build_child_gets_normal_modes_while_capture_stays_private(self):
+        directory = self.harness / "mode-control"; directory.mkdir(mode=0o700)
+        diagnostics = directory / "diagnostics"; diagnostics.mkdir(mode=0o700)
+        config = directory / "container-config.yml"
+        child_report = diagnostics / "child.json"
+        program = "import os,sys; [os.close(os.open(p,os.O_WRONLY|os.O_CREAT,0o644)) for p in sys.argv[1:]]"
+        previous = os.umask(0o077)
+        try:
+            with (diagnostics / "capture.stdout").open("w") as stdout:
+                gate.physical_process([sys.executable, "-B", "-c", program, str(config), str(child_report)],
+                                      stdout=stdout, stderr=subprocess.DEVNULL, check=True, timeout=30)
+            # Child umask must not alter the private capture parent's umask.
+            parent_control = directory / "parent-control"
+            fd = os.open(parent_control, os.O_WRONLY | os.O_CREAT, 0o644); os.close(fd)
+            self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o644)
+            self.assertEqual(stat.S_IMODE(parent_control.stat().st_mode), 0o600)
+            gate.protect_reports(diagnostics)
+            self.assertEqual(stat.S_IMODE(diagnostics.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((diagnostics / "capture.stdout").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(child_report.stat().st_mode), 0o600)
+        finally:
+            os.umask(previous)
+
+    def test_private_diagnostic_protection_refuses_linked_reports(self):
+        directory = self.harness / "diagnostic-link-control"; directory.mkdir()
+        (directory / "foreign.stdout").symlink_to(self.harness / ".gitignore")
+        with self.assertRaises(RuntimeError): gate.protect_reports(directory)
 
 
 if __name__ == "__main__":
