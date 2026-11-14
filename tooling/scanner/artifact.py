@@ -2,8 +2,10 @@
 import datetime as dt
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import tarfile
 
 from registry import descriptor, document, require, Refusal, sha, MANIFEST_TYPES, INDEX_TYPES
@@ -130,19 +132,41 @@ def scan_arguments():
             "--offline-scan", "--timeout", "30m", "--format", "json", "--exit-code", "0"]
 
 
+def owned_tool_user(work):
+    """Use the unprivileged creator of private input/cache paths, never UID0."""
+    uid, gid = os.geteuid(), os.getegid()
+    require(0 < uid < 2**32 - 1 and 0 < gid < 2**32 - 1 and
+            uid == os.getuid() and gid == os.getgid(), "tool-owner-nonroot-identity")
+    for path, directory in ((work, True), (work / "oci", True), (work / "cache", True),
+                            (work / "cache/tmp", True), (work / "empty.yaml", False), (work / "empty.ignore", False)):
+        info = path.lstat()
+        require(not path.is_symlink() and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+                and info.st_uid == uid and info.st_gid == gid and
+                stat.S_IMODE(info.st_mode) == (0o700 if directory else 0o600) and
+                (directory or info.st_nlink == 1), "tool-input-cache-owner-or-mode")
+    require((work / "empty.yaml").read_bytes() == b"{}\n" and (work / "empty.ignore").read_bytes() == b"",
+            "tool-empty-config-or-ignore-changed")
+    return str(uid) + ":" + str(gid)
+
+
 class Trivy:
     def __init__(self, daemon, tool, work, reports):
         self.daemon, self.tool, self.work, self.reports = daemon, tool, work, reports
+        self.user = owned_tool_user(work)
+        (reports / "tool-execution-identity.json").write_text(json.dumps({"user": self.user,
+            "input_directories_mode": "0700", "input_config_files_mode": "0600",
+            "owner_and_modes_verified": True, "root_or_caps_added": False}) + "\n")
         self.sequence = 0
 
     def invoke(self, arguments, *, network=False, timeout=1800):
+        require(owned_tool_user(self.work) == self.user, "tool-owner-identity-changed")
         self.sequence += 1
         name = "relay-scanner-" + self.daemon.owner + "-trivy-" + str(self.sequence)
         # Only the reviewed tool runs. The candidate ClamAV image is never
         # installed in this daemon, started, or supplied as an entrypoint.
         result = self.daemon.docker(["run", "--rm", "--name", name,
             "--label", "relay.ci.owner=" + self.daemon.owner, "--network", "host" if network else "none",
-            "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
+            "--user", self.user, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
             "--memory=3g", "--cpus=2", "--pids-limit=256", "--tmpfs", "/tmp:rw,nosuid,nodev,size=128m",
             "--mount", "type=bind,src=" + str(self.work) + ",dst=/input,readonly",
             "--mount", "type=bind,src=" + str(self.work / "cache") + ",dst=/cache",

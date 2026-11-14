@@ -36,7 +36,18 @@ Loop/mount/unit/socket identities are verified; cleanup stops only that daemon
 and detaches only its own backing file. Ambiguous ownership refuses cleanup.
 No existing Hash container, image, volume, scanner network or service is used.
 
-The 35 closed synthetic controls cover digest/size/redirect/subject/trust and
+The tool runs as the verified nonroot invoking UID:GID that owns the input and
+cache paths. Fixed input/cache directories must remain 0700 and configuration
+files 0600, without symlinks, foreign ownership or linked files. Root execution,
+changed identity and modified empty config/ignore inputs refuse before Docker.
+Capabilities remain dropped, no-new-privileges and read-only input/root mounts
+remain enforced. No global chmod or additional capabilities are used. The
+numeric identity is retained in the encrypted diagnostic record. Original run
+29db used the tool image's default UID0 and was denied access before DB network
+activity; original numeric host ownership was not recorded, and no OCI archive
+had been created at that failed stage.
+
+The 38 closed synthetic controls cover digest/size/redirect/subject/trust and
 DB/report refusals, unfixed vulnerabilities, early stop, source/event/storage
 ownership and separate result semantics. They perform no Docker/network call.
 The subject parser accepts at most 32 uniquely named bounded subjects, with

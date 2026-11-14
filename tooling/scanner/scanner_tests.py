@@ -5,6 +5,8 @@ import io
 from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -415,7 +417,7 @@ class ScannerControls(unittest.TestCase):
         value = report(); value["Results"][0]["Vulnerabilities"] = [
             {"VulnerabilityID": "CVE-2099-1004", "Severity": "HIGH", "FixedVersion": ""}]
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); cache = root / "cache"; cache.mkdir()
+            root = Path(temporary); private_tool_inputs(root); cache = root / "cache"
             for name, version in (("db", 2), ("java-db", 1)):
                 directory = cache / name; directory.mkdir()
                 (directory / "metadata.json").write_text(json.dumps({**metadata(), "Version": version}))
@@ -433,12 +435,64 @@ class ScannerControls(unittest.TestCase):
             self.assertEqual(invoke.call_count, 4)
             self.assertEqual(daemon.docker.call_count, 2)
 
+    def test_tool_user_matches_private_inputs_and_cache_without_privilege_relaxation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); private_tool_inputs(root)
+            daemon = mock.Mock(); daemon.owner = "synthetic-owner"
+            daemon.docker.return_value = mock.Mock(returncode=0, stdout=b"{}", stderr=b"")
+            scanner = artifact.Trivy(daemon, {"config_digest": CONFIG}, root, root)
+            scanner.invoke(["version"])
+            args = daemon.docker.call_args.args[0]
+            self.assertEqual(args[args.index("--user") + 1], str(os.geteuid()) + ":" + str(os.getegid()))
+            for required in ("--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true"):
+                self.assertIn(required, args)
+            self.assertIn("type=bind,src=" + str(root) + ",dst=/input,readonly", args)
+            self.assertIn("type=bind,src=" + str(root / "cache") + ",dst=/cache", args)
+            self.assertNotIn("--privileged", args); self.assertFalse(any(x.startswith("--cap-add") for x in args))
+            code = "from pathlib import Path; import sys; p=Path(sys.argv[1]); assert (p/'empty.yaml').read_bytes()==b'{}\\n'; (p/'cache/probe').write_bytes(b'synthetic'); print('owned-input-cache-ok')"
+            completed = subprocess.run([sys.executable, "-B", "-c", code, str(root)], capture_output=True, text=True, timeout=15)
+            self.assertEqual((completed.returncode, completed.stdout.strip()), (0, "owned-input-cache-ok"))
+            self.assertEqual((root / "empty.yaml").stat().st_mode & 0o777, 0o600)
+            self.assertEqual((root / "cache").stat().st_mode & 0o777, 0o700)
+            self.assertEqual((root / "cache/probe").stat().st_uid, os.geteuid())
+
+    def test_tool_refuses_root_mismatched_or_foreign_owner_before_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); private_tool_inputs(root); daemon = mock.Mock()
+            for real, effective in ((0, 0), (os.getuid(), 0), (os.getuid() + 1, os.getuid() + 1)):
+                with self.subTest(real=real, effective=effective), mock.patch.object(artifact.os, "getuid", return_value=real), \
+                     mock.patch.object(artifact.os, "geteuid", return_value=effective), self.assertRaises(registry.Refusal):
+                    artifact.Trivy(daemon, {"config_digest": CONFIG}, root, root)
+            daemon.docker.assert_not_called()
+
+    def test_tool_refuses_input_cache_modes_links_and_changed_config_before_execution(self):
+        for damage in ("input-mode", "input-symlink", "input-hardlink", "cache-mode", "cache-tmp-symlink", "changed-config"):
+            with self.subTest(damage=damage), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); private_tool_inputs(root); daemon = mock.Mock()
+                if damage == "input-mode": (root / "empty.yaml").chmod(0o644)
+                elif damage == "input-symlink":
+                    (root / "other").write_text("{}\n"); (root / "empty.yaml").unlink(); (root / "empty.yaml").symlink_to(root / "other")
+                elif damage == "input-hardlink": os.link(root / "empty.ignore", root / "second-link")
+                elif damage == "cache-mode": (root / "cache").chmod(0o755)
+                elif damage == "cache-tmp-symlink":
+                    (root / "other-cache").mkdir(); (root / "cache/tmp").rmdir(); (root / "cache/tmp").symlink_to(root / "other-cache", target_is_directory=True)
+                else: (root / "empty.yaml").write_text("unexpected: true\n")
+                with self.assertRaises(registry.Refusal): artifact.Trivy(daemon, {"config_digest": CONFIG}, root, root)
+                daemon.docker.assert_not_called()
+
 
 def load_sealer():
     spec = spec_from_file_location("scanner_public_summary_controls", Path(__file__).with_name("seal-public.py"))
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def private_tool_inputs(root):
+    for name in ("oci", "cache", "cache/tmp"):
+        (root / name).mkdir(mode=0o700, exist_ok=True)
+    for name, raw in (("empty.yaml", b"{}\n"), ("empty.ignore", b"")):
+        (root / name).write_bytes(raw); (root / name).chmod(0o600)
 
 
 from contextlib import contextmanager
@@ -486,7 +540,7 @@ def cleanup_fixture():
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(ScannerControls)
     # This closed inventory deliberately changes only with reviewed source.
-    if suite.countTestCases() != 35:
+    if suite.countTestCases() != 38:
         raise SystemExit("Closed scanner control inventory changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     destination = os.environ.get("RELAY_SCANNER_RESULTS_DIR")
@@ -494,7 +548,7 @@ def main():
         (Path(destination) / "scanner-controls-summary.json").write_text(json.dumps({"schema": 1,
             "tests": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
             "skips": len(result.skipped), "status": "passed" if result.wasSuccessful() and not result.skipped else "failed"}) + "\n")
-    if result.skipped or result.testsRun != 35 or not result.wasSuccessful():
+    if result.skipped or result.testsRun != 38 or not result.wasSuccessful():
         raise SystemExit(1)
 
 

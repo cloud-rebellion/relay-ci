@@ -28,7 +28,7 @@ def results_directory():
             path.stat().st_uid == os.getuid()
             and path.stat().st_mode & 0o777 == 0o700, "scanner-results-directory-not-fresh-private")
     controls = document((path / "scanner-controls-summary.json").read_bytes())
-    require(controls == {"schema": 1, "tests": 35, "failures": 0, "errors": 0, "skips": 0,
+    require(controls == {"schema": 1, "tests": 38, "failures": 0, "errors": 0, "skips": 0,
                          "status": "passed"}, "scanner-closed-controls-not-passed")
     return path
 
