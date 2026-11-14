@@ -36,9 +36,15 @@ Loop/mount/unit/socket identities are verified; cleanup stops only that daemon
 and detaches only its own backing file. Ambiguous ownership refuses cleanup.
 No existing Hash container, image, volume, scanner network or service is used.
 
-The 32 closed synthetic controls cover digest/size/redirect/subject/trust and
+The 35 closed synthetic controls cover digest/size/redirect/subject/trust and
 DB/report refusals, unfixed vulnerabilities, early stop, source/event/storage
 ownership and separate result semantics. They perform no Docker/network call.
+The subject parser accepts at most 32 uniquely named bounded subjects, with
+every digest dictionary exactly the one target SHA256. The initial real run
+found ten same-image subjects in the linked official SPDX statement; the
+positive control uses its actual count/digest and four observed aliases plus
+six explicitly synthetic redacted-name labels. It does not claim a raw-body
+replay or publisher signature trust.
 They require an ordinary official local scratch qualification after source
 review; the privileged Linux storage backend also needs its actual public CI
 execution. A synthetic pass is not a Linux runtime qualification.

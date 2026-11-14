@@ -131,15 +131,59 @@ class ScannerControls(unittest.TestCase):
                 registry.select_image(value, DIGEST)
 
     def test_attestation_subject_mismatch_and_unsigned_trust(self):
-        value = {"_type": "https://in-toto.io/Statement/v0.1", "subject": [{"digest": {"sha256": "a" * 64}}],
+        value = {"_type": "https://in-toto.io/Statement/v0.1", "subject": [{"name": "synthetic", "digest": {"sha256": "a" * 64}}],
                  "predicateType": "https://slsa.dev/provenance/v0.2", "predicate": {}}
         actual = registry.inspect_attestation(json.dumps(value).encode(), DIGEST)
         self.assertTrue(actual["subject_verified"])
         self.assertFalse(actual["publisher_signature_verified"])
-        for change in ({"subject": [{"digest": {"sha256": "d" * 64}}]},
+        for change in ({"subject": [{"name": "synthetic", "digest": {"sha256": "d" * 64}}]},
                        {"predicateType": "https://unknown.invalid/type"}):
             with self.assertRaises(registry.Refusal):
                 registry.inspect_attestation(json.dumps({**value, **change}).encode(), DIGEST)
+
+    def test_observed_ten_same_image_alias_subjects_are_accepted(self):
+        # Count/digests and these four aliases come from fixed public SPDX
+        # a2fe0686.., observed 2026-11-14. Six withheld upstream names are
+        # represented by unique synthetic labels; no raw body replay is claimed.
+        target = "sha256:2d901d81cbd1ed6556edfde8e20391bf81a13365d8f3ad9460d1c0340470ad89"
+        names = ["pkg:docker/clamav/clamav@" + tag + "?platform=linux%2Famd64" for tag in
+                 ("1.5.4_base-debian", "1.5.4_base-debian13-slim", "1.5_base-debian", "1.5_base-debian13-slim")]
+        names += ["synthetic-redacted-upstream-alias-" + str(i) for i in range(6)]
+        value = {"_type": "https://in-toto.io/Statement/v0.1", "subject": [
+                    {"name": name, "digest": {"sha256": target[7:]}} for name in names],
+                 "predicateType": "https://spdx.dev/Document", "predicate": {}}
+        actual = registry.inspect_attestation(json.dumps(value).encode(), target)
+        self.assertEqual(actual["subject_count"], 10)
+        self.assertTrue(actual["subject_verified"])
+        self.assertFalse(actual["publisher_signature_verified"])
+
+    def test_attestation_alias_count_bounds_are_closed(self):
+        value = {"_type": "https://in-toto.io/Statement/v1", "subject": [],
+                 "predicateType": "https://spdx.dev/Document", "predicate": {}}
+        with self.assertRaisesRegex(registry.Refusal, "attestation-subject-count"):
+            registry.inspect_attestation(json.dumps(value).encode(), DIGEST)
+        value["subject"] = [{"name": "alias-" + str(i), "digest": {"sha256": DIGEST[7:]}} for i in range(32)]
+        self.assertEqual(registry.inspect_attestation(json.dumps(value).encode(), DIGEST)["subject_count"], 32)
+        value["subject"].append({"name": "alias-32", "digest": {"sha256": DIGEST[7:]}})
+        with self.assertRaisesRegex(registry.Refusal, "attestation-subject-count"):
+            registry.inspect_attestation(json.dumps(value).encode(), DIGEST)
+
+    def test_attestation_alias_mixed_digest_duplicate_type_and_name_refused(self):
+        good = {"name": "first", "digest": {"sha256": DIGEST[7:]}}
+        invalid = [None, "not-an-object", {}, {"name": "first", "digest": good["digest"]},
+                   {"name": "other", "digest": {"sha256": "d" * 64}},
+                   {"name": "other", "digest": {"sha256": DIGEST[7:], "sha1": "b" * 40}},
+                   {"name": "other", "digest": []}, {"name": "", "digest": good["digest"]},
+                   {"name": 1, "digest": good["digest"]},
+                   {"name": "nul\u0000name", "digest": good["digest"]},
+                   {"name": "unicode\u0085control", "digest": good["digest"]},
+                   {"name": "hidden\u200bformat", "digest": good["digest"]},
+                   {"name": "x" * 4097, "digest": good["digest"]}]
+        for bad in invalid:
+            value = {"_type": "https://in-toto.io/Statement/v1", "subject": [good, bad],
+                     "predicateType": "https://spdx.dev/Document", "predicate": {}}
+            with self.subTest(bad=bad), self.assertRaises(registry.Refusal):
+                registry.inspect_attestation(json.dumps(value).encode(), DIGEST)
 
     def test_database_fresh_positive_and_no_prior_download_credit(self):
         actual = artifact.validate_database(metadata(), now=NOW, started=START)
@@ -442,7 +486,7 @@ def cleanup_fixture():
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(ScannerControls)
     # This closed inventory deliberately changes only with reviewed source.
-    if suite.countTestCases() != 32:
+    if suite.countTestCases() != 35:
         raise SystemExit("Closed scanner control inventory changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     destination = os.environ.get("RELAY_SCANNER_RESULTS_DIR")
@@ -450,7 +494,7 @@ def main():
         (Path(destination) / "scanner-controls-summary.json").write_text(json.dumps({"schema": 1,
             "tests": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
             "skips": len(result.skipped), "status": "passed" if result.wasSuccessful() and not result.skipped else "failed"}) + "\n")
-    if result.skipped or result.testsRun != 32 or not result.wasSuccessful():
+    if result.skipped or result.testsRun != 35 or not result.wasSuccessful():
         raise SystemExit(1)
 
 

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -189,9 +190,18 @@ def inspect_attestation(raw, expected_subject):
     require(value.get("_type") in {"https://in-toto.io/Statement/v0.1", "https://in-toto.io/Statement/v1"},
             "attestation-statement-type")
     subjects = value.get("subject")
-    require(isinstance(subjects, list) and len(subjects) == 1 and
-            subjects[0].get("digest", {}).get("sha256") == expected_subject.removeprefix("sha256:"),
-            "attestation-subject")
+    require(DIGEST.fullmatch(expected_subject) is not None, "attestation-subject-target")
+    require(isinstance(subjects, list) and 0 < len(subjects) <= 32, "attestation-subject-count")
+    names = set()
+    for subject in subjects:
+        require(isinstance(subject, dict), "attestation-subject-type")
+        name = subject.get("name")
+        require(isinstance(name, str) and name and
+                not any(unicodedata.category(c) in {"Cc", "Cf", "Cs"} for c in name) and
+                len(name.encode("utf-8")) <= 4096, "attestation-subject-name")
+        require(name not in names, "attestation-subject-duplicate-name")
+        names.add(name)
+        require(subject.get("digest") == {"sha256": expected_subject[7:]}, "attestation-subject")
     predicate_type = value.get("predicateType")
     require(predicate_type in {"https://slsa.dev/provenance/v0.2", "https://slsa.dev/provenance/v1",
                                "https://spdx.dev/Document"}, "attestation-predicate-type")
@@ -212,6 +222,7 @@ def inspect_attestation(raw, expected_subject):
     # Content-addressed registry linkage is verified, publisher signature/trust is
     # not invented. An unsigned statement can never authorize full acceptance.
     return {"predicate_type": predicate_type, "subject_verified": True,
+            "subject_count": len(subjects),
             "publisher_signature_verified": False, "statement_sha256": sha(raw),
             "asserted_git_materials": git_materials}
 
