@@ -1,0 +1,46 @@
+name: Relay scanner artifact assessment
+
+on:
+  push:
+    branches: ['scanner/assessment-20261114']
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-security:
+    if: github.repository == 'cloud-rebellion/relay-ci' && github.ref == 'refs/heads/scanner/assessment-20261114'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prepare private assessment diagnostics
+        shell: bash
+        run: |
+          umask 077
+          relay_scanner_results="$RUNNER_TEMP/relay-scanner-results-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir "$relay_scanner_results"
+          echo "RELAY_SCANNER_RESULTS_DIR=$relay_scanner_results" >> "$GITHUB_ENV"
+      - name: Run closed synthetic controls without Docker or network calls
+        shell: bash
+        run: |
+          python3 -B tooling/scanner/scanner_tests.py > "$RELAY_SCANNER_RESULTS_DIR/scanner-controls.stdout" 2> "$RELAY_SCANNER_RESULTS_DIR/scanner-controls.stderr"
+      - name: Assess exact public OCI and fresh strict vulnerability policy
+        run: python3 -B tooling/scanner/run-public.py
+      - name: Encrypt raw diagnostics using the separate scanner summary schema
+        if: always()
+        run: python3 -B tooling/scanner/seal-public.py
+      - name: Retain bounded ciphertext and artifact-only summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay-scanner-artifact-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/relay-sealed-scanner-artifact/diagnostics.tar.gz.age
+            ${{ runner.temp }}/relay-sealed-scanner-artifact/official-scanner-oci.tar.age
+            ${{ runner.temp }}/relay-sealed-scanner-artifact/public-summary.json
