@@ -119,30 +119,70 @@ class ScannerControls(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0].full_url.startswith("https://registry-1.docker.io/v2/clamav/clamav/blobs/"))
         self.assertIsNotNone(calls[0].get_header("Authorization"))
-        self.assertEqual(registry.CDN_HOSTS, {"production.cloudflare.docker.com", "production.cloudfront.docker.com"})
+        self.assertEqual(registry.CDN_HOSTS, {"production.cloudflare.docker.com", "production.cloudfront.docker.com",
+                                             "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com"})
         self.assertEqual(instance.refused_routes, [{"hostname": "unknown.cdn.example", "scheme": "https", "port": 443,
                                                    "credentials_present": False}])
         self.assertNotIn("signature", json.dumps(instance.refused_routes))
         self.assertNotIn(instance.token, json.dumps(instance.refused_routes))
 
     def test_blob_redirect_strips_bearer_and_retains_no_signed_url(self):
+        raw = b"synthetic CDN content"
+        digest = registry.sha(raw)
+        path = "/registry-v2/blobs/sha256/" + digest[7:] + "/data"
+        for host in sorted(registry.CDN_HOSTS):
+            for suffix in ("", ":443"):
+                with self.subTest(host=host, port=suffix or "default"):
+                    calls = []
+                    def open_request(request, **_):
+                        calls.append(request)
+                        if len(calls) == 1:
+                            raise urllib.error.HTTPError(request.full_url, 307, "redirect", {
+                                "Location": "https://" + host + suffix + path + "?synthetic_signed=do-not-retain"}, None)
+                        return Response(raw)
+                    instance = registry.Registry("clamav/clamav", opener=mock.Mock(open=open_request))
+                    instance.token = "synthetic-memory-only-authorization"
+                    self.assertEqual(instance.get("blobs", digest), raw)
+                    self.assertEqual(len(calls), 2)
+                    self.assertIsNotNone(calls[0].get_header("Authorization"))
+                    self.assertIsNone(calls[1].get_header("Authorization"))
+                    self.assertEqual(calls[1].full_url.split("?", 1)[0], "https://" + host + suffix + path)
+                    for forbidden in ("synthetic_signed", "do-not-retain", instance.token, host, path):
+                        self.assertNotIn(forbidden, json.dumps(instance.receipts))
+                    instance.close()
+                    self.assertIsNone(instance.token)
+        host = "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com"
+        for target in ("http://" + host + path, "https://" + host + ":444" + path,
+                       "https://user:password@" + host + path, "https://" + host + ".evil.invalid" + path,
+                       "https://docker-images-prod.s3.dualstack.us-west-2.amazonaws.com" + path):
+            with self.subTest(refused_target=target):
+                calls = []
+                def denied_request(request, **_):
+                    calls.append(request)
+                    raise urllib.error.HTTPError(request.full_url, 307, "redirect", {"Location": target}, None)
+                instance = registry.Registry("clamav/clamav", opener=mock.Mock(open=denied_request))
+                instance.token = "synthetic-registry-bearer"
+                with self.assertRaisesRegex(registry.Refusal, "registry-host"):
+                    instance.get("blobs", digest)
+                self.assertEqual(len(calls), 1)  # denied redirect never gets an outbound request
+        opener = mock.Mock()
+        instance = registry.Registry("clamav/clamav", opener=opener)
+        instance.token = "synthetic-registry-bearer"
+        with self.assertRaisesRegex(registry.Refusal, "authorization-boundary"):
+            instance._open("https://" + host + path, auth=True, cdn=True)
+        opener.open.assert_not_called()
         calls = []
-        def open_request(request, **_):
+        def mismatched_content(request, **_):
             calls.append(request)
             if len(calls) == 1:
-                raise urllib.error.HTTPError(request.full_url, 307, "redirect", {
-                    "Location": "https://production.cloudflare.docker.com/blob?synthetic_signed=do-not-retain"}, None)
-            return Response(b"synthetic")
-        instance = registry.Registry("clamav/clamav", opener=mock.Mock(open=open_request))
-        instance.token = "synthetic-memory-only-authorization"
-        value = instance.get("blobs", registry.sha(b"synthetic"))
-        self.assertEqual(value, b"synthetic")
-        self.assertIsNotNone(calls[0].get_header("Authorization"))
+                raise urllib.error.HTTPError(request.full_url, 307, "redirect", {"Location": "https://" + host + path}, None)
+            return Response(b"wrong digest content")
+        instance = registry.Registry("clamav/clamav", opener=mock.Mock(open=mismatched_content))
+        instance.token = "synthetic-registry-bearer"
+        with self.assertRaisesRegex(registry.Refusal, "digest"):
+            instance.get("blobs", digest)
+        self.assertEqual(len(calls), 2)
         self.assertIsNone(calls[1].get_header("Authorization"))
-        self.assertNotIn("synthetic_signed", json.dumps(instance.receipts))
-        self.assertNotIn(instance.token, json.dumps(instance.receipts))
-        instance.close()
-        self.assertIsNone(instance.token)
 
     def test_blob_foreign_redirect_refused(self):
         error = urllib.error.HTTPError("https://registry-1.docker.io/a", 307, "redirect",
