@@ -1,0 +1,9 @@
+# REVIEW CANDIDATE ONLY. Activation held. Compose image override for a later,
+# separately accepted direct-official route; no custom derived-image assertion.
+# Requires the reviewed base companion: retain all22 settings, named DB volume,
+# private bridge/no published ports, inherited startup and4GiB ceiling.
+# This file is NOT applied by the public daemon-assessment workflow.
+services:
+  clamav:
+    image: docker.io/clamav/clamav@sha256:b2c2f5c9a557dc1c1249e09448a84c59c3e414bb3bbbac0a9d065236c779842c
+    platform: linux/amd64

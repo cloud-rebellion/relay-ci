@@ -1,0 +1,46 @@
+name: Relay scanner daemon subset
+
+on:
+  push:
+    branches: ['scanner/assessment-20261114']
+
+permissions:
+  contents: read
+
+jobs:
+  daemon-subset:
+    if: github.repository == 'cloud-rebellion/relay-ci' && github.ref == 'refs/heads/scanner/assessment-20261114'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prepare private bounded diagnostics
+        shell: bash
+        run: |
+          umask 077
+          result="$RUNNER_TEMP/relay-scanner-phase1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir "$result"
+          echo "RELAY_SCANNER_PHASE1_RESULTS_DIR=$result" >> "$GITHUB_ENV"
+      - name: Existing42 controls and new22 daemon controls without Docker or network
+        shell: bash
+        run: |
+          RELAY_SCANNER_RESULTS_DIR="$RELAY_SCANNER_PHASE1_RESULTS_DIR" python3 -B tooling/scanner/scanner_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stderr"
+          python3 -B tooling/scanner/daemon_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/daemon-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/daemon-controls.stderr"
+      - name: Strict artifact scan then inherited daemon subset in owned bounded backend
+        run: python3 -B tooling/scanner/run-daemon.py --execute
+      - name: Encrypt raw diagnostics and keep full acceptance false
+        if: always()
+        run: python3 -B tooling/scanner/seal-daemon.py
+      - name: Retain only bounded ciphertext and public subset summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay-scanner-daemon-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/relay-sealed-scanner-daemon/diagnostics.tar.gz.age
+            ${{ runner.temp }}/relay-sealed-scanner-daemon/public-summary.json
