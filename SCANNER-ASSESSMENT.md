@@ -25,11 +25,15 @@ Anonymous registry authorization remains in memory. OCI descriptor hashes and
 sizes, platform/config/layer closure, linked in-toto statement subjects and
 predicate types are checked. The image is materialized as a one-image OCI
 directory for Trivy; a canonical OCI tar is retained as encrypted custody.
-Trivy 0.74.0's own OCI reader consumes a directory, so the driver does not
+Trivy 0.76.2's own OCI reader consumes a directory, so the driver does not
 mislabel a Docker export or assume support for an OCI tar input.
 
-The Trivy tool identity is the existing exact 0.74.0 manifest pin, not an old
-scan verdict. Its registry bytes, platform config, pulled image ID and executed
+The Trivy tool identity is the official 0.76.2 OCI index pinned by exact digest.
+The actual prior Alpine run43700092005 had zero HIGH/CRITICAL findings but
+stopped because Trivy0.74.0 did not recognize Alpine3.24 in its support table.
+Official0.76.2 includes3.24 with a2028-06-01 support date. Warnings still
+refuse; no lifecycle or vulnerability exception is introduced. This source
+change is not a scan verdict. Its registry bytes, platform config, pulled image ID and executed
 version must match in this run. A newly downloaded vulnerability DB must be at
 most 24 hours old, not overdue/future-dated and hashed unchanged through both
 scan and SBOM. The Java package index is separately downloaded now and must be
@@ -104,9 +108,12 @@ Docker extraction in this artifact packet is for later reviewed composition;
 it is not required or published by this workflow. Final app S3/private P3 and
 the original six job source identities remain pending their normal lifecycle.
 
-Primary implementation references: Trivy v0.74.0
-[`pkg/fanal/image/oci.go`](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/fanal/image/oci.go),
-[`pkg/types/report.go`](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/types/report.go),
-[`pkg/db/db.go`](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/db/db.go),
-[`pkg/javadb/client.go`](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/javadb/client.go)
-and [`pkg/flag/vulnerability_flags.go`](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/flag/vulnerability_flags.go).
+Primary implementation references: Trivy v0.76.2
+[`pkg/fanal/image/oci.go`](https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/fanal/image/oci.go),
+[`pkg/types/report.go`](https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/types/report.go),
+[`pkg/db/db.go`](https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/db/db.go),
+[`pkg/javadb/client.go`](https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/javadb/client.go)
+and [`pkg/flag/vulnerability_flags.go`](https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/flag/vulnerability_flags.go).
+
+Official tool release: https://github.com/aquasecurity/trivy/releases/tag/v0.76.2
+Alpine support table: https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/detector/ospkg/alpine/alpine.go

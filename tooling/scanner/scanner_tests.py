@@ -31,7 +31,7 @@ def metadata():
 
 
 def report():
-    return {"SchemaVersion": 2, "ArtifactType": "container_image", "Trivy": {"Version": "0.74.0"},
+    return {"SchemaVersion": 2, "ArtifactType": "container_image", "Trivy": {"Version": "0.76.2"},
             "Metadata": {"ImageID": CONFIG, "OS": {"Family": "alpine", "Name": "3.24.4"},
                          "ImageConfig": {"os": "linux", "architecture": "amd64"}, "DiffIDs": [DIGEST]},
             "Results": [{"Target": "synthetic", "Class": "os-pkgs", "Type": "alpine",
@@ -338,6 +338,8 @@ class ScannerControls(unittest.TestCase):
     def test_tool_pin_cannot_be_mutated(self):
         with self.assertRaisesRegex(registry.Refusal, "reviewed-tool-pin"):
             artifact.validate_tool_manifest(mock.Mock(), "docker.io/aquasec/trivy:latest")
+        with self.assertRaisesRegex(registry.Refusal, "reviewed-tool-pin"):
+            artifact.validate_tool_manifest(mock.Mock(), "docker.io/aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969")
 
     def test_profile_exact_base_policy_and_unknown_keys_refused(self):
         value = json.loads((Path(__file__).resolve().parents[2] / "profiles/scanner-artifact.json").read_text())
@@ -491,7 +493,7 @@ class ScannerControls(unittest.TestCase):
             daemon.docker.return_value = mock.Mock(returncode=0, stdout=json.dumps([{"Id": CONFIG}]).encode())
             scanner = artifact.Trivy(daemon, {"reference": artifact.TOOL_REFERENCE, "config_digest": CONFIG}, root, root)
             # Version, DB download, Java download, actual structured verdict.
-            responses = [b'{"Version":"0.74.0"}', b"", b"", json.dumps(value).encode()]
+            responses = [b'{"Version":"0.76.2"}', b"", b"", json.dumps(value).encode()]
             moments = iter([START, NOW, NOW])
             with mock.patch.object(scanner, "invoke", side_effect=responses) as invoke:
                 result = scanner.assess(scan_profile(), now=lambda: next(moments))

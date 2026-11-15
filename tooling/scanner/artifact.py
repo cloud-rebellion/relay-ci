@@ -10,8 +10,8 @@ import tarfile
 
 from registry import descriptor, document, require, Refusal, sha, MANIFEST_TYPES, INDEX_TYPES
 
-TOOL_REFERENCE = "docker.io/aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
-TOOL_VERSION = "0.74.0"
+TOOL_REFERENCE = "docker.io/aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
+TOOL_VERSION = "0.76.2"
 
 
 def utc(value):

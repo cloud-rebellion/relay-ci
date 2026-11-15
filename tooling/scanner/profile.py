@@ -26,7 +26,7 @@ def load(path):
     require(value["image"] == IMAGE and value["vulnerability_policy"] == POLICY,
             "scanner-profile-subject-or-policy")
     require(value["tool"] == {"reference": TOOL_REFERENCE, "version": TOOL_VERSION,
-                "pin_origin": "historical-tool-identity-revalidate-registry-and-runtime-in-this-run"},
+                "pin_origin": "official-v0.76.2-metadata-registry-and-runtime-revalidated"},
             "scanner-profile-tool")
     require(value["source_policy_sha256"] == "20e2351806c6dd55b60a0589b53cbba0fc4fd4d256e589e6397e9850da513d2f"
             and value["source_companion_sha256"] == "7ae8c304f263099ba236634ac68f076c14034d4564773e8951d0e89586b90913",
