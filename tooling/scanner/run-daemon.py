@@ -24,6 +24,7 @@ from daemon_policy import (CONFIG, CONFIG_PATH, DB_PATH, MARKER, SECOND, MEMORY,
                            config_witness, trace_witness, fresh_version, verdict, stream_chunks, resource_witness)
 from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
 from freshclam_check import check_inherited
+from direct_fixtures import (CONTROL_COUNT as FIXTURE_CONTROL_COUNT, FixtureDaemon, prepare_host_tools, build_corpus, scan_corpus)
 
 KIND = "relay-public-scanner-daemon-subset-v1"
 CONTROL_COUNT = 41
@@ -45,8 +46,9 @@ def owned_results():
             "phase1-owned-private-results")
     require({x.name for x in root.iterdir()} == {"daemon-controls.stdout", "daemon-controls.stderr",
             "daemon-controls-summary.json", "scanner-controls.stdout", "scanner-controls.stderr",
-            "scanner-controls-summary.json"}, "phase1-fresh-results-files")
-    for name, count in (("daemon", CONTROL_COUNT), ("scanner", 42)):
+            "scanner-controls-summary.json", "direct-fixtures-controls.stdout", "direct-fixtures-controls.stderr",
+            "direct-fixtures-controls-summary.json"}, "phase1-fresh-results-files")
+    for name, count in (("daemon", CONTROL_COUNT), ("scanner", 42), ("direct-fixtures", FIXTURE_CONTROL_COUNT)):
         require(document((root / (name + "-controls-summary.json")).read_bytes()) ==
                 {"schema": 1, "tests": count, "failures": 0, "errors": 0, "skips": 0, "status": "passed"},
                 "phase1-closed-controls-not-passed")
@@ -149,7 +151,7 @@ def cases(candidate):
 
 
 def assess(root, profile):
-    with BoundedDaemon(root, private_containerd=True) as daemon:
+    with FixtureDaemon(root, private_containerd=True) as daemon:
         work = daemon.mount / "assessment"
         work.mkdir(mode=0o700)
         (work / "cache/tmp").mkdir(parents=True, mode=0o700)
@@ -180,13 +182,16 @@ def assess(root, profile):
         require(security.get("verdict") == "passed" and security.get("high") == 0 and security.get("critical") == 0
                 and security.get("sbom_generated") is True, "phase1-image-security-not-clear")
         record(root, "phase1-oci-custody", custody)
+        fixture_tools = prepare_host_tools(daemon, root)
+        fixture_corpus = build_corpus(daemon, fixture_tools)
         phases, observations = [], []
         with PrivateEgress(daemon) as network, OwnedTrace(daemon) as trace, Candidate(daemon, network, config) as candidate:
             candidate.start()
             candidate.ready()
             phases.append(witness(candidate, trace, root, "initial-load"))
             write_signature(candidate)
-            observations.append({"phase": "first-test-signature-reload", "cases": cases(candidate)})
+            observations.append({"phase": "first-test-signature-reload", "cases": cases(candidate),
+                "direct_fixtures": scan_corpus(candidate, fixture_corpus, root, "first-reload")})
             phases.append(witness(candidate, trace, root, "first-reload"))
             # Freshclam's real check may report up-to-date. Record that honestly;
             # a synthetic vendor version increment is never fabricated.
@@ -205,14 +210,16 @@ def assess(root, profile):
             candidate.start()
             candidate.ready(300)
             phases.append(witness(candidate, trace, root, "ordinary-restart"))
-            observations.append({"phase": "recovered", "cases": cases(candidate)})
+            observations.append({"phase": "recovered", "cases": cases(candidate),
+                "direct_fixtures": scan_corpus(candidate, fixture_corpus, root, "recovered")})
             candidate.remove()
             candidate.create()
             candidate.start()
             candidate.ready(300)
             phases.append(witness(candidate, trace, root, "retained-volume-recreation"))
             observations.append({"phase": "retained-recreation", "cases": cases(candidate),
-                                 "second_signature": wait_control(candidate, SECOND)})
+                "direct_fixtures": scan_corpus(candidate, fixture_corpus, root, "retained-recreation"),
+                "second_signature": wait_control(candidate, SECOND)})
             # Keep actual syscall witness private and bounded. It is not source ancestry.
             (root / "actual-clamd-config-trace.stdout").write_bytes(trace.snapshot())
         # Context cleanup must succeed before a passed subset receipt exists.
@@ -221,7 +228,10 @@ def assess(root, profile):
     return {"artifact_security": security, "phases": phases, "observations": observations,
             "owned_resources_settled": True, "hard_filesystem_bytes": 8 << 30,
             "candidate_memory_limit_bytes": MEMORY, "freshclam_check_performed": True,
-            "vendor_signature_version_advance_required_or_claimed": False}
+            "vendor_signature_version_advance_required_or_claimed": False,
+            "direct_document_limit_subset": {"case_count_per_phase": 11,
+                "phases": ["first-reload", "recovered", "retained-recreation"],
+                "time_queue_stall_or_app_acceptance_claimed": False}}
 
 
 def main():
