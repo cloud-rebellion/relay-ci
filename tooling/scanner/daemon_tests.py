@@ -1,4 +1,5 @@
 """Synthetic controls only: no socket, registry, Docker, provider or host calls."""
+import base64
 import copy
 import datetime as dt
 import importlib.util
@@ -15,6 +16,7 @@ from unittest import mock
 
 import daemon_policy as policy
 import storage
+import freshclam_check
 from daemon_runtime import PrivateEgress, Candidate, OwnedTrace, owned_inventory, rule_identity
 from registry import Refusal
 
@@ -520,11 +522,85 @@ class DaemonControls(unittest.TestCase):
             with self.assertRaises(Refusal):daemon.stop_private_runtime()
             self.assertEqual(sum("stop" in args for args in calls),1)
 
+    def freshclam_config(self):
+        raw=b"UpdateLogFile /var/log/clamav/freshclam.log\nChecks 12\n"
+        parsed=b'Config file: freshclam.conf\nUpdateLogFile = "/var/log/clamav/freshclam.log"\nChecks = "12"\nBytecode = "yes"\n'
+        return raw,parsed
+
+    def freshclam_cycle(self):
+        return (b"Received signal: wake up\nClamAV update process started at synthetic-time\n"+
+            b"main.cvd database is up-to-date (version: 1, sigs: 2, f-level: 3, builder: fixture)\n"+
+            b"daily.cld updated (version: 4, sigs: 5, f-level: 6, builder: fixture)\n"+
+            b"bytecode.cvd database is up-to-date (version: 7, sigs: 8, f-level: 9, builder: fixture)\n"+
+            b"--------------------------------------\n")
+
+    def test_inherited_freshclam_requires_new_complete_generation_and_effective_checks(self):
+        raw,parsed=self.freshclam_config()
+        proof=freshclam_check.config_proof(raw,parsed,["freshclam","--daemon","--checks=4"])
+        self.assertEqual(proof["checks"],4);self.assertEqual(proof["file_checks"],12)
+        self.assertEqual(proof["checks_source"],"daemon-argv")
+        for argv in (["freshclam","--daemon"],["freshclam","--checks=12"],
+                     ["freshclam","--checks=4","--checks=4"],["freshclam","--checks=4","--bytecode=no"]):
+            with self.subTest(argv=argv),self.assertRaises(Refusal):freshclam_check.config_proof(raw,parsed,argv)
+        off=freshclam_check.config_proof(raw,parsed.replace(b'Bytecode = "yes"',b'Bytecode = "no"'),["freshclam","-c","4"])
+        self.assertEqual(off["databases"],["main","daily"])
+        cycle=self.freshclam_cycle(); result=freshclam_check.completed_generation(cycle,proof["databases"])
+        self.assertFalse(result["version_advance_required_or_claimed"])
+        self.assertEqual(set(result["databases"]),{"main","daily","bytecode"})
+        for old in (cycle.replace(b"Received signal: wake up\n",b""),
+                    cycle.replace(b"ClamAV update process started at ",b"other-start "),cycle.split(b"--------------------------------------")[0]):
+            with self.subTest(old=old):self.assertIsNone(freshclam_check.completed_generation(old,proof["databases"]))
+        for invalid in (cycle.replace(b"bytecode.cvd database is up-to-date",b"other.cvd database is up-to-date"),
+                        b"ERROR: update failed\n"+cycle,cycle+b"Update failed.\n",
+                        cycle.replace(b"main.cvd database is up-to-date",b"main.cvd partial clean")):
+            with self.subTest(invalid=invalid),self.assertRaises(Refusal):freshclam_check.completed_generation(invalid,proof["databases"])
+
+    def test_inherited_freshclam_one_signal_unknown_response_never_duplicates(self):
+        raw,parsed=self.freshclam_config()
+        for outcome in ("completed","pending","rotated","not-idle"):
+            with self.subTest(outcome=outcome),tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);signals=[]
+                candidate=SimpleNamespace(cid="c"*64,inspect=mock.Mock())
+                candidate.process_metadata=mock.Mock(return_value={"pid":10,"start_ticks":"111","exe":"/usr/bin/freshclam",
+                    "cmdline":["freshclam","--daemon","--foreground","--stdout","--checks=4"]})
+                candidate.execute=mock.Mock(side_effect=lambda args:raw if args==["cat",freshclam_check.CONFIG_PATH] else parsed)
+                cursor={"dev":1,"ino":2,"size":100}
+                def command(args):
+                    self.assertEqual(args[:4],["sudo","-n","python3","-c"])
+                    self.assertEqual(args[6:9],["10","111",candidate.cid])
+                    mode=args[5]
+                    if mode=="baseline":value={"cursor":cursor,"caught_sigusr1":outcome!="not-idle"}
+                    elif mode=="signal":
+                        self.assertTrue((root/"freshclam-wakeup-intent.json").is_file())
+                        self.assertEqual((root/"freshclam-wakeup-intent.json").stat().st_mode&0o777,0o600)
+                        signals.append(mode);raise Refusal("synthetic-signal-response-lost")
+                    else:
+                        self.assertEqual(mode,"read")
+                        if outcome=="rotated":raise Refusal("synthetic-log-rotated")
+                        body=self.freshclam_cycle() if outcome=="completed" else b""
+                        value={"cursor":{**cursor,"size":100+len(body)},"new_bytes_base64":base64.b64encode(body).decode()}
+                    return SimpleNamespace(returncode=0,stdout=json.dumps(value).encode())
+                candidate.d=SimpleNamespace(command=mock.Mock(side_effect=command),
+                    docker=mock.Mock(return_value=SimpleNamespace(stdout=b"PID COMMAND\n10 freshclam\n")))
+                with mock.patch.object(freshclam_check.time,"monotonic",side_effect=[0,1,400]),mock.patch.object(freshclam_check.time,"sleep"):
+                    if outcome=="completed":
+                        result=freshclam_check.check_inherited(candidate,root)
+                        self.assertFalse(result["signal_response_acknowledged"])
+                        self.assertEqual(result["signal_attempts"],1)
+                        self.assertEqual((root/"real-freshclam-check.stdout").read_bytes(),self.freshclam_cycle())
+                    else:
+                        with self.assertRaises(Refusal):freshclam_check.check_inherited(candidate,root)
+                self.assertEqual(len(signals),0 if outcome=="not-idle" else 1)
+                if outcome!="not-idle":
+                    with self.assertRaisesRegex(Refusal,"no-repeat"):freshclam_check.check_inherited(candidate,root)
+                    self.assertEqual(len(signals),1)
+                else:self.assertFalse((root/"freshclam-wakeup-intent.json").exists())
+
 
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(DaemonControls)
     count = suite.countTestCases()
-    if count != 34:
+    if count != 36:
         raise RuntimeError("Closed daemon controls changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     value = {"schema": 1, "tests": result.testsRun, "failures": len(result.failures),

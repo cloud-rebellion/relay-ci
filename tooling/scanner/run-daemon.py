@@ -23,9 +23,10 @@ from storage import BoundedDaemon, public_runner
 from daemon_policy import (CONFIG, CONFIG_PATH, DB_PATH, MARKER, SECOND, MEMORY, REFERENCE, SETTINGS,
                            config_witness, trace_witness, fresh_version, verdict, stream_chunks, resource_witness)
 from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
+from freshclam_check import check_inherited
 
 KIND = "relay-public-scanner-daemon-subset-v1"
-CONTROL_COUNT = 34
+CONTROL_COUNT = 36
 
 
 def record(root, name, value):
@@ -189,9 +190,8 @@ def assess(root, profile):
             phases.append(witness(candidate, trace, root, "first-reload"))
             # Freshclam's real check may report up-to-date. Record that honestly;
             # a synthetic vendor version increment is never fabricated.
-            update = candidate.execute(["freshclam", "--stdout", "--verbose"], timeout=900)
-            require(0 < len(update) <= 4 << 20, "freshclam-update-witness-bound")
-            (root / "real-freshclam-check.stdout").write_bytes(update)
+            update = check_inherited(candidate,root)
+            record(root,"real-freshclam-check",update)
             write_signature(candidate, second=True)
             phases.append(witness(candidate, trace, root, "second-reload-after-freshclam-check"))
             observations.append({"phase": "second-reload", "second_signature": wait_control(candidate, SECOND)})
