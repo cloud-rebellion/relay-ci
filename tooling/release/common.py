@@ -5,13 +5,15 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import shutil
 import signal
 import subprocess
+import tarfile
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from binding import private_product, source_sha, origin_sha
+from binding import ACTIVE_GO_VERSION, compiler_contract, inspect_go_binary, private_product, source_sha, origin_sha, git, git_object, committed_tree
 import uuid
 
 ROOT = Path(__file__).resolve().parent
@@ -76,6 +78,9 @@ def require_zero(command, name, **kwargs):
 
 
 def compiler_inputs():
+    if PINS['go'] != ACTIVE_GO_VERSION:
+        raise RuntimeError("The active compiler pin must remain exactly Go 1.26.11")
+    active = compiler_contract(PRODUCT)
     dockerfile = (PRODUCT / "Dockerfile").read_text()
     module = (PRODUCT / "go.mod").read_text()
     if "FROM golang:" + PINS["go"] + "-alpine AS backend" not in dockerfile:
@@ -85,6 +90,7 @@ def compiler_inputs():
     if "FROM oven/bun:" + PINS["bun"] + "-alpine AS frontend" not in dockerfile:
         raise RuntimeError("Bun checker differs from the production builder")
     return {"go": PINS["go"], "bun": PINS["bun"],
+            "active_compiler_contract": active,
             "go_image": "golang:" + PINS["go"] + "-alpine",
             "bun_image": "oven/bun:" + PINS["bun"] + "-alpine",
             "dockerfile_sha256": hashlib.sha256(dockerfile.encode()).hexdigest(),
@@ -95,17 +101,14 @@ def module_export(module, destination):
     """Export exact committed compiler blobs, with a compile-only embed stub."""
     if destination.exists():
         raise RuntimeError("Module export must be fresh")
-    repository = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=module, text=True).strip())
+    repository = Path(git(module, "rev-parse", "--show-toplevel").decode().strip())
     prefix = module.relative_to(repository).as_posix() + "/"
-    tree = subprocess.check_output(["git", "ls-tree", "-r", "-z", source_sha(), "--", prefix], cwd=repository)
+    _, tree, _ = committed_tree(repository, source_sha())
     entries = []
-    for raw in tree.split(b"\0"):
-        if not raw:
-            continue
-        metadata, path = raw.decode().split("\t", 1)
-        mode, kind, blob = metadata.split()
+    for path, row in tree.items():
         if not path.startswith(prefix):
-            raise RuntimeError("Committed compiler source escaped its module")
+            continue
+        mode, kind, blob = row["mode"], row["type"], row["oid"]
         relative = Path(path[len(prefix):])
         if relative.is_absolute() or ".." in relative.parts:
             raise RuntimeError("Invalid committed compiler path")
@@ -124,7 +127,7 @@ def module_export(module, destination):
             raise RuntimeError("Linked or nonregular compiler input requires review")
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(subprocess.check_output(["git", "cat-file", "blob", blob], cwd=repository))
+        target.write_bytes(git_object(repository, "blob", blob))
     if module == PRODUCT:
         stub = destination / "cmd/server/frontend/build/index.html"
         stub.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +160,7 @@ class DockerSession(AbstractContextManager):
         self.networks = []
         self.network_ids = {}
         self.images = []
+        self.graceful_containers = set()
         self.old_handlers = {}
 
     def __enter__(self):
@@ -229,6 +233,82 @@ class DockerSession(AbstractContextManager):
                 raise RuntimeError("Started database ownership could not be verified")
         return status, name
 
+    def read_relay_binary(self, image, output):
+        """Read daemon filesystem bytes from an owned container that never starts."""
+        validate_image_id(image)
+        item = self._inspect("image", image)
+        if not item or item["Id"] != image or item.get("Config", {}).get("Volumes"):
+            raise RuntimeError("Binary readback requires the exact image with no volumes")
+        directory = output_directory().resolve()
+        output = Path(output)
+        archive = directory / "image-binary-readback.tar"
+        if output != directory / "final-image-brightcrm.bin" or any(path.exists() or path.is_symlink() for path in (output, archive)):
+            raise RuntimeError("Image binary outputs must be fresh fixed private files")
+        name = "relay-ci-" + self.owner + "-binary-readback"
+        if name in self.containers:
+            raise RuntimeError("Image binary readback cannot be repeated")
+        self.containers.append(name)
+        self.graceful_containers.add(name)
+        cidfile = directory / (name + ".cid")
+        self.container_ids[name] = cidfile
+        limit = 128 * 1024 * 1024
+        create = ["docker", "create", "--rm", "--pull=never", "--name", name, "--cidfile", str(cidfile),
+                  "--label", "relay.ci.owner=" + self.owner, "--read-only", "--network", "none",
+                  "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--no-healthcheck",
+                  "--memory", "64m", "--cpus", "1", "--pids-limit", "32", "--stop-timeout", "5",
+                  "--entrypoint", "/__relay_ci_never_start__", image]
+        require_zero(create, "image-binary-create", timeout=30)
+        identity = cidfile.read_text().strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", identity):
+            raise RuntimeError("Image reader has no exact container identity")
+        def owned_created():
+            current = self._inspect("container", name)
+            state = current.get("State", {}) if current else {}
+            if not current or current["Id"] != identity or current["Name"] != "/" + name or current.get("Image") != image or \
+                    current.get("Config", {}).get("Labels", {}).get("relay.ci.owner") != self.owner or \
+                    state.get("Status") != "created" or state.get("Running") is not False or \
+                    state.get("StartedAt") != "0001-01-01T00:00:00Z" or current.get("RestartCount") != 0:
+                raise RuntimeError("Image reader changed identity or was started")
+        owned_created()
+        def output_limit():
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limit + 1024 * 1024,) * 2)
+        with archive.open("xb") as stdout, (directory / "image-binary-readback.stderr").open("xb") as stderr:
+            archive.chmod(0o600)
+            (directory / "image-binary-readback.stderr").chmod(0o600)
+            try:
+                result = subprocess.run(["docker", "cp", identity + ":/usr/local/bin/brightcrm", "-"],
+                                        env=clean_environment(), stdout=stdout, stderr=stderr,
+                                        timeout=30, preexec_fn=output_limit)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise RuntimeError("Owned image binary archive capture failed") from error
+        owned_created()
+        if result.returncode or not 0 < archive.stat().st_size <= limit + 1024 * 1024:
+            raise RuntimeError("Owned image binary archive capture failed or exceeded its bound")
+        try:
+            with tarfile.open(archive, "r:") as bundle:
+                member = bundle.next()
+                if not member or member.name != "brightcrm" or member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE) or \
+                        member.linkname or member.sparse is not None or not 0 < member.size <= limit:
+                    raise RuntimeError("Image archive must contain only the fixed bounded regular executable")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise RuntimeError("Image binary archive body is missing")
+                written = 0
+                with source, output.open("xb") as destination:
+                    output.chmod(0o600)
+                    while block := source.read(min(1024 * 1024, member.size - written + 1)):
+                        written += len(block)
+                        if written > member.size:
+                            raise RuntimeError("Image binary archive body exceeds its declared size")
+                        destination.write(block)
+                if written != member.size or bundle.next() is not None:
+                    raise RuntimeError("Image binary archive is truncated or contains extra entries")
+        except (tarfile.TarError, OSError, EOFError) as error:
+            raise RuntimeError("Image binary archive is malformed or truncated") from error
+        metadata = inspect_go_binary(output, results_root=directory)
+        archive.unlink()
+        return metadata
+
     def __exit__(self, exc_type, exc, tb):
         errors = []
         for name in reversed(self.containers):
@@ -239,7 +319,14 @@ class DockerSession(AbstractContextManager):
                 expected = self.container_ids[name].read_text().strip()
                 if not re.fullmatch(r"[0-9a-f]{64}", expected) or item["Id"] != expected or item["Name"] != "/" + name or item["Config"].get("Labels", {}).get("relay.ci.owner") != self.owner:
                     raise RuntimeError("Foreign or mismatched container state preserved")
-                require_zero(["docker", "container", "rm", "-f", "-v", item["Id"]], "cleanup-" + name)
+                if name in self.graceful_containers and item.get("State", {}).get("Running"):
+                    require_zero(["docker", "container", "stop", "--time", "5", item["Id"]],
+                                 "stop-" + name, timeout=20)
+                    item = self._inspect("container", name)
+                    if item and (item["Id"] != expected or item["Name"] != "/" + name or item["Config"].get("Labels", {}).get("relay.ci.owner") != self.owner):
+                        raise RuntimeError("Changed container state after graceful stop preserved")
+                if item:
+                    require_zero(["docker", "container", "rm", "-f", "-v", item["Id"]], "cleanup-" + name)
             except Exception as error:
                 errors.append(str(error))
         for name in reversed(self.networks):

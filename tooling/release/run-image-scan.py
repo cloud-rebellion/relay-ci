@@ -45,6 +45,9 @@ def main():
                           "--label", "org.opencontainers.image.revision=" + release_origin, str(PRODUCT)], "final-image-build", timeout=4500)
             file_digest(iid, 80)
             image_id = validate_image_id(iid.read_text().strip())
+            binary = directory / "final-image-brightcrm.bin"
+            binary_metadata = docker.read_relay_binary(image_id, binary)
+            binary.unlink()
             require_zero(["docker", "image", "save", "--output", str(archive), image_id], "final-image-archive")
             digest = file_digest(archive, POLICY["trivy_max_archive_bytes"])
             scanner = docker.pull(POLICY["trivy_reference"], "trivy")
@@ -74,6 +77,7 @@ def main():
     # A success receipt is authoritative only after tag, scanner-container and
     # network cleanup has returned successfully; no passed report survives a refusal.
     write_report("image-summary", {"source_sha": sha, "origin_stage_commit": release_origin, "status": "passed", "image_id": image_id,
+                 "binary_compiler": binary_metadata, "binary_image_path": "/usr/local/bin/brightcrm",
                  "archive_sha256": digest, "scanner_image_id": scanner,
                  "scanner_reference": POLICY["trivy_reference"], "blocking_severities": ["CRITICAL", "HIGH"],
                  "ignore_unfixed": True, "accepted_advisories": [], "scanner_daemon_socket_mounted": False})

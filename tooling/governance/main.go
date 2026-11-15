@@ -13,14 +13,32 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+)
+
+const activeCompilerVersion = "1.26.11"
+
+type nativeControllerProfile string
+
+// This records the deployed native controller; it is not the public release compiler.
+const deployedNativeRelay7910Profile nativeControllerProfile = "deployed-native-relay-7-9-10-v1"
+
+var requiredNativeInputNames = []string{"ci_brightcrm_toolchain.go", "ci_contract_test.go", "ci_coverage_test.go", "ci_go.go", "ci_go_toolchain_parity_test.go", "component_impact.go", "deploy_brightcrm.go", "product_policy.go", "repo_coverage_registry.go", "repo_coverage_scope.go", "security_coverage_test.go", "security_gate.go", "security_gate_scan_test.go", "security_trivy.go"}
+
+type compilerProfile uint8
+
+const (
+	activeReleaseProfile compilerProfile = iota
+	historicalCompilerProfile
 )
 
 var guardNames = []string{
@@ -42,9 +60,10 @@ type sourcePin struct {
 	SHA256 string `json:"sha256"`
 }
 type provenance struct {
-	Schema       int         `json:"schema"`
-	SourceCommit string      `json:"source_commit"`
-	Inputs       []sourcePin `json:"inputs"`
+	Schema                  int                     `json:"schema"`
+	NativeControllerProfile nativeControllerProfile `json:"native_controller_profile"`
+	SourceCommit            string                  `json:"source_commit"`
+	Inputs                  []sourcePin             `json:"inputs"`
 }
 type result struct {
 	Name          string   `json:"name"`
@@ -54,12 +73,15 @@ type result struct {
 	Findings      []string `json:"findings"`
 }
 type report struct {
-	Schema             int      `json:"schema"`
-	Status             string   `json:"status"`
-	Scope              string   `json:"scope"`
-	SelectedGuardCount int      `json:"selected_guard_count"`
-	Assertions         []result `json:"assertions"`
-	Refusal            string   `json:"refusal,omitempty"`
+	Schema                  int                     `json:"schema"`
+	Status                  string                  `json:"status"`
+	Scope                   string                  `json:"scope"`
+	SelectedGuardCount      int                     `json:"selected_guard_count"`
+	Assertions              []result                `json:"assertions"`
+	Refusal                 string                  `json:"refusal,omitempty"`
+	NativeControllerProfile nativeControllerProfile `json:"native_controller_profile"`
+	NativeGo11Admitted      bool                    `json:"native_go11_admitted"`
+	PublicGo11Required      bool                    `json:"public_go11_required"`
 }
 type candidate struct{ group, minimum int }
 type credentialRule struct {
@@ -216,20 +238,24 @@ func regularRead(root, path string, limit int64) ([]byte, error) {
 }
 func loadInputs(root, origin string) (map[string]*ast.File, error) {
 	raw, err := os.ReadFile(origin)
-	if err != nil {
-		return nil, fail("governance provenance missing")
+	if err != nil || len(raw) > 256<<10 {
+		return nil, fail("governance provenance missing or unbounded")
 	}
 	var pins provenance
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	// Additional descriptive provenance fields belong to mapping.json, not this closed input manifest.
-	if dec.Decode(&pins) != nil || pins.Schema != 1 || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(pins.SourceCommit) || len(pins.Inputs) != 14 {
+	if dec.Decode(&pins) != nil || pins.Schema != 1 || pins.NativeControllerProfile != deployedNativeRelay7910Profile || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(pins.SourceCommit) || len(pins.Inputs) != len(requiredNativeInputNames) {
 		return nil, fail("governance provenance malformed")
+	}
+	var trailing any
+	if dec.Decode(&trailing) != io.EOF {
+		return nil, fail("governance provenance has trailing data")
 	}
 	out := map[string]*ast.File{}
 	previous := ""
-	for _, pin := range pins.Inputs {
-		if !strings.HasPrefix(pin.Path, "stage/userworkflows/") || !strings.HasSuffix(pin.Path, ".go") || pin.Path <= previous || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(pin.Blob) || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(pin.SHA256) {
+	for index, pin := range pins.Inputs {
+		if pin.Path != "stage/userworkflows/"+requiredNativeInputNames[index] || pin.Path <= previous || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(pin.Blob) || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(pin.SHA256) {
 			return nil, fail("governance provenance is not canonical")
 		}
 		previous = pin.Path
@@ -247,7 +273,7 @@ func loadInputs(root, origin string) (map[string]*ast.File, error) {
 		}
 		out[filepath.Base(pin.Path)] = file
 	}
-	for _, name := range []string{"ci_go.go", "ci_coverage_test.go", "ci_contract_test.go", "ci_go_toolchain_parity_test.go", "security_coverage_test.go", "security_gate_scan_test.go", "security_trivy.go", "repo_coverage_scope.go", "repo_coverage_registry.go", "component_impact.go", "product_policy.go", "security_gate.go", "ci_brightcrm_toolchain.go", "deploy_brightcrm.go"} {
+	for _, name := range requiredNativeInputNames {
 		if out[name] == nil {
 			return nil, fail("required governance source omitted")
 		}
@@ -321,8 +347,84 @@ func selectedGuards(f *ast.File) ([]string, error) {
 	}
 	return selected, nil
 }
+func identifier(expression ast.Expr, name string) bool {
+	value, ok := expression.(*ast.Ident)
+	return ok && value.Name == name
+}
+
+// Parse the exact deployed literal selector as data. It intentionally does NOT
+// admit Go11; active app SDK/module/builders are independently required to use11.
+func deployedNativeCompilerPolicy(file *ast.File) error {
+	if file == nil {
+		return fail("deployed native Relay compiler selector missing")
+	}
+	matches := 0
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "brightCRMReviewedToolchain" {
+			continue
+		}
+		matches++
+		if function.Recv != nil || function.Type.TypeParams != nil || function.Type.Params == nil || len(function.Type.Params.List) != 1 || function.Type.Results == nil || len(function.Type.Results.List) != 2 || function.Body == nil || len(function.Body.List) != 1 {
+			return fail("deployed native Relay selector signature changed")
+		}
+		parameter := function.Type.Params.List[0]
+		if len(parameter.Names) != 1 || parameter.Names[0].Name != "version" || !identifier(parameter.Type, "string") {
+			return fail("deployed native Relay selector parameter changed")
+		}
+		for index, expected := range []string{"string", "bool"} {
+			result := function.Type.Results.List[index]
+			if len(result.Names) != 0 || !identifier(result.Type, expected) {
+				return fail("deployed native Relay selector results changed")
+			}
+		}
+		selection, ok := function.Body.List[0].(*ast.SwitchStmt)
+		if !ok || selection.Init != nil || !identifier(selection.Tag, "version") || selection.Body == nil || len(selection.Body.List) != 4 {
+			return fail("deployed native Relay selector cases changed")
+		}
+		for index, expected := range []string{"1.26.7", "1.26.9", "1.26.10", ""} {
+			clause, ok := selection.Body.List[index].(*ast.CaseClause)
+			if !ok || len(clause.Body) != 1 {
+				return fail("deployed native Relay selector case body changed")
+			}
+			if expected == "" {
+				if len(clause.List) != 0 {
+					return fail("deployed native Relay selector default missing")
+				}
+			} else {
+				if len(clause.List) != 1 {
+					return fail("deployed native Relay selector case changed")
+				}
+				version, err := literal(clause.List[0])
+				if err != nil || version != expected {
+					return fail("deployed native Relay compiler set changed")
+				}
+			}
+			returned, ok := clause.Body[0].(*ast.ReturnStmt)
+			if !ok || len(returned.Results) != 2 {
+				return fail("deployed native Relay selector return changed")
+			}
+			image, err := literal(returned.Results[0])
+			wantImage, wantBool := "", "false"
+			if expected != "" {
+				wantImage, wantBool = "golang:"+expected+"-alpine", "true"
+			}
+			if err != nil || image != wantImage || !identifier(returned.Results[1], wantBool) {
+				return fail("deployed native Relay selector literal admission changed")
+			}
+		}
+	}
+	if matches != 1 {
+		return fail("deployed native Relay selector missing or duplicated")
+	}
+	return nil
+}
+
 func readPolicy(inputs map[string]*ast.File) (policy, error) {
 	p := policy{}
+	if err := deployedNativeCompilerPolicy(inputs["ci_brightcrm_toolchain.go"]); err != nil {
+		return p, err
+	}
 	if _, err := selectedGuards(inputs["ci_go.go"]); err != nil {
 		return p, err
 	}
@@ -674,7 +776,19 @@ func versionParts(value string) ([3]int, bool) {
 	}
 	return out, true
 }
+func requireActiveHostCompiler(version string) error {
+	if version != "go"+activeCompilerVersion {
+		return fail("active Relay governance requires the exact Go 1.26.11 SDK")
+	}
+	return nil
+}
+
+// Only the active profile is reachable from qualification. Historical compiler
+// profiles are retained for explicit regression controls, never a CLI or env option.
 func toolchainFromModule(raw []byte) (string, error) {
+	return toolchainFromModuleFor(raw, activeReleaseProfile)
+}
+func toolchainFromModuleFor(raw []byte, profile compilerProfile) (string, error) {
 	if len(raw) == 0 || len(raw) > 256<<10 || !utf8.Valid(raw) {
 		return "", fail("module is not bounded UTF-8")
 	}
@@ -691,8 +805,20 @@ func toolchainFromModule(raw []byte) (string, error) {
 		values[fields[0]] = fields[1]
 	}
 	version, ok := strings.CutPrefix(values["toolchain"], "go")
-	if !ok || values["module"] != "github.com/bright-interaction/brightcrm" || !contains([]string{"1.26.7", "1.26.9", "1.26.10"}, version) {
+	if !ok || values["module"] != "github.com/bright-interaction/brightcrm" {
 		return "", fail("unreviewed Relay compiler")
+	}
+	switch profile {
+	case activeReleaseProfile:
+		if version != activeCompilerVersion {
+			return "", fail("active Relay release requires the exact Go 1.26.11 compiler")
+		}
+	case historicalCompilerProfile:
+		if !contains([]string{"1.26.7", "1.26.9", "1.26.10"}, version) {
+			return "", fail("unreviewed historical Relay compiler")
+		}
+	default:
+		return "", fail("unknown compiler profile")
 	}
 	minimum, ok := versionParts(values["go"])
 	chosen, chosenOK := versionParts(version)
@@ -710,11 +836,17 @@ func toolchainFromModule(raw []byte) (string, error) {
 	return "golang:" + version + "-alpine", nil
 }
 func compilerParity(root string) (int, []string, error) {
+	if err := requireActiveHostCompiler(runtime.Version()); err != nil {
+		return 0, nil, err
+	}
+	return compilerParityFor(root, activeReleaseProfile)
+}
+func compilerParityFor(root string, profile compilerProfile) (int, []string, error) {
 	mod, err := regularRead(root, "brightcrm/go.mod", 256<<10)
 	if err != nil {
 		return 0, nil, err
 	}
-	image, err := toolchainFromModule(mod)
+	image, err := toolchainFromModuleFor(mod, profile)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -837,7 +969,7 @@ func compilerParity(root string) (int, []string, error) {
 func fileExists(path string) bool     { _, err := os.Stat(path); return err == nil }
 func stripComment(line string) string { code, _, _ := strings.Cut(line, "#"); return code }
 func runGuards(root string, p policy) report {
-	r := report{Schema: 1, Status: "passed", Scope: "product-partition:brightcrm;owned-root:brightcrm", SelectedGuardCount: len(guardNames), Assertions: []result{}}
+	r := report{Schema: 1, Status: "passed", Scope: "product-partition:brightcrm;owned-root:brightcrm", SelectedGuardCount: len(guardNames), Assertions: []result{}, NativeControllerProfile: deployedNativeRelay7910Profile, NativeGo11Admitted: false, PublicGo11Required: true}
 	add := func(index, checked int, applicability string, findings []string) {
 		if findings == nil {
 			findings = []string{}
@@ -923,7 +1055,7 @@ func runGuards(root string, p policy) report {
 	if compilerErr != nil {
 		compilerFindings = []string{"compiler policy refused input"}
 	}
-	add(5, builders, "all owned Dockerfile-prefix and .Dockerfile-suffix inputs under bounded reviewed Relay compiler grammar", compilerFindings)
+	add(5, builders, "exact Go1.26.11 host SDK, module toolchain and every owned Dockerfile-prefix or .Dockerfile-suffix builder under bounded reviewed grammar", compilerFindings)
 	matched := 0
 	var unraced []string
 	if ciErr == nil {

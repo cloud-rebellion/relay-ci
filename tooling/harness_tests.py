@@ -4,12 +4,14 @@ import hashlib
 import importlib.util
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import stat
 import sys
 import tempfile
 import unittest
+import zlib
 from unittest import mock
 
 import binding
@@ -138,6 +140,100 @@ class Identity(Fixture):
         with mock.patch.dict(os.environ, env):
             with self.assertRaises(RuntimeError):
                 binding.verify(self.profile, harness=self.harness, check_event=True)
+
+    def write_object(self, kind, body):
+        return subprocess.check_output(["/usr/bin/git", "hash-object", "-t", kind, "-w", "--stdin"],
+                                       cwd=self.harness, input=body, stderr=subprocess.PIPE).decode().strip()
+
+    def forged_public_tree(self):
+        body = b"forged trusted-tooling bytes\n"
+        blob = self.write_object("blob", body)
+        raw = b"100644 .gitignore\0" + bytes.fromhex(blob)
+        return body, blob, raw, self.write_object("tree", raw)
+
+    def test_public_commit_replacement_cannot_forge_trusted_tooling(self):
+        body, blob, _, tree = self.forged_public_tree()
+        raw = ("tree " + tree + "\nauthor Synthetic <relay@example.test> 1 +0000\n"
+               "committer Synthetic <relay@example.test> 1 +0000\n\nsynthetic replacement\n").encode()
+        replacement = self.write_object("commit", raw)
+        self.command(self.harness, "replace", self.g, replacement)
+        (self.harness / ".gitignore").write_bytes(body)
+        self.assertIn(blob, self.command(self.harness, "ls-tree", "-r", self.g))
+        with self.assertRaises(RuntimeError): self.verify()
+
+    def test_public_tree_replacement_cannot_forge_trusted_tooling(self):
+        original = self.command(self.harness, "rev-parse", self.g + "^{tree}").strip()
+        body, blob, _, tree = self.forged_public_tree()
+        self.command(self.harness, "replace", original, tree)
+        (self.harness / ".gitignore").write_bytes(body)
+        self.assertIn(blob, self.command(self.harness, "ls-tree", "-r", self.g))
+        with self.assertRaises(RuntimeError): self.verify()
+
+    def test_loose_public_tree_forgery_under_trusted_oid_refuses(self):
+        original = self.command(self.harness, "rev-parse", self.g + "^{tree}").strip()
+        body, _, raw, _ = self.forged_public_tree()
+        target = self.harness / ".git/objects" / original[:2] / original[2:]
+        target.unlink()
+        target.write_bytes(zlib.compress(b"tree " + str(len(raw)).encode() + b"\0" + raw))
+        (self.harness / ".gitignore").write_bytes(body)
+        with self.assertRaises(RuntimeError): self.verify()
+
+    def test_hostile_git_environment_cannot_redirect_identity_or_execute_commands(self):
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        foreign = Path(temporary.name); self.command(foreign, "init", "--quiet"); self.commit(foreign)
+        marker = foreign / "executed"
+        binary = foreign / "git"
+        binary.write_text("#!/bin/sh\nprintf hostile > " + shlex.quote(str(marker)) + "\nexit 1\n")
+        binary.chmod(0o700)
+        env = {"GIT_DIR": str(foreign / ".git"), "GIT_WORK_TREE": str(foreign),
+               "GIT_COMMON_DIR": str(foreign / ".git"), "GIT_INDEX_FILE": str(foreign / "wrong-index"),
+               "GIT_OBJECT_DIRECTORY": str(foreign / ".git/objects"), "GIT_NAMESPACE": "forged",
+               "GIT_REPLACE_REF_BASE": "refs/forged/", "GIT_CONFIG_COUNT": "1",
+               "GIT_CONFIG_KEY_0": "core.fsmonitor", "GIT_CONFIG_VALUE_0": str(binary),
+               "GIT_CONFIG_PARAMETERS": "'core.fsmonitor=true'", "GIT_SSH_COMMAND": str(binary),
+               "PATH": str(foreign) + ":" + os.environ.get("PATH", "")}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(self.verify()["workflow_commit"], self.g)
+        self.assertFalse(marker.exists())
+
+    def test_public_staged_extra_input_cannot_hide_as_tracked(self):
+        (self.harness / "forged.py").write_text("unexpected executable input\n")
+        self.command(self.harness, "add", "forged.py")
+        with self.assertRaises(RuntimeError): self.verify()
+
+    def test_private_staged_extra_input_cannot_hide_as_tracked(self):
+        (self.private / "brightcrm/forged.py").write_text("unexpected application input\n")
+        self.command(self.private, "add", "brightcrm/forged.py")
+        with self.assertRaises(RuntimeError): self.verify()
+
+    def test_source_verification_never_executes_configured_fsmonitor(self):
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        marker = Path(temporary.name) / "fsmonitor-executed"
+        hook = self.private / ".git/hooks/synthetic-fsmonitor"
+        hook.write_text("#!/bin/sh\nprintf called > " + shlex.quote(str(marker)) + "\nprintf '1\\0'\n")
+        hook.chmod(0o700)
+        self.command(self.private, "config", "core.fsmonitor", ".git/hooks/synthetic-fsmonitor")
+        self.verify()
+        self.assertFalse(marker.exists())
+        # Prove the configured command is live on the removed ordinary-status path.
+        subprocess.run(["/usr/bin/git", "status", "--porcelain=v1", "--untracked-files=no"],
+                       cwd=self.private, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        self.assertTrue(marker.exists())
+
+    def test_source_verification_never_executes_configured_clean_filter(self):
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        marker = Path(temporary.name) / "filter-executed"
+        script = self.private / ".git/hooks/synthetic-clean"
+        script.write_text("#!/bin/sh\nprintf called > " + shlex.quote(str(marker)) + "\n/bin/cat\n")
+        script.chmod(0o700)
+        (self.private / ".git/info/attributes").write_text("brightcrm/go.mod filter=synthetic\n")
+        self.command(self.private, "config", "filter.synthetic.clean", shlex.quote(str(script)))
+        module = self.private / "brightcrm/go.mod"; module.write_bytes(module.read_bytes())
+        self.verify()
+        self.assertFalse(marker.exists())
+        subprocess.run(["/usr/bin/git", "status", "--porcelain=v1", "--untracked-files=no"],
+                       cwd=self.private, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        self.assertTrue(marker.exists())
 
     def test_public_tooling_byte_drift_refuses_even_when_head_is_unchanged(self):
         (self.harness / ".gitignore").write_text("altered trusted input\n")
@@ -290,6 +386,146 @@ class ProcessPermissions(Fixture):
         directory = self.harness / "diagnostic-link-control"; directory.mkdir()
         (directory / "foreign.stdout").symlink_to(self.harness / ".gitignore")
         with self.assertRaises(RuntimeError): gate.protect_reports(directory)
+
+
+class ActiveCompilerContract(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
+        self.product = Path(self.temporary.name) / "brightcrm"; self.product.mkdir()
+        self.write_module("go.mod", "github.com/bright-interaction/brightcrm")
+        self.write_module("voip/go.mod", "brightcrm-voip")
+        (self.product / "Dockerfile").write_text("FROM oven/bun:1.4.3-alpine AS frontend\nFROM golang:1.26.11-alpine AS backend\nRUN go build ./cmd/server\nFROM alpine:3.21\n")
+
+    def write_module(self, path, name, compiler="1.26.11", minimum="1.26.3"):
+        path = self.product / path; path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"module {name}\n\ngo {minimum}\n\ntoolchain go{compiler}\n")
+
+    def verify(self, sdk="go1.26.11"):
+        return binding.compiler_contract(self.product, sdk_version=sdk)
+
+    def test_active_sdk_module_and_builder_contract_passes(self):
+        value = self.verify()
+        self.assertEqual(value["go_sdk"], "go1.26.11")
+        self.assertEqual(value["go"], "1.26.11")
+        self.assertEqual({x["toolchain"] for x in value["modules"].values()}, {"go1.26.11"})
+        self.assertEqual(value["docker_go_builders"], [{"path": "Dockerfile", "reference": "golang:1.26.11-alpine"}])
+
+    def test_older_newer_or_nonrelease_host_sdk_refuses(self):
+        for sdk in ("go1.26.6", "go1.26.10", "go1.26.12", "go1.27.0", "devel go1.26.11", ""):
+            with self.subTest(sdk=sdk), self.assertRaises(RuntimeError): self.verify(sdk)
+
+    def test_real_sdk_probe_rejects_old_sdk_despite_active_pin(self):
+        tools = Path(self.temporary.name) / "bin"; tools.mkdir()
+        executable = tools / "go"
+        executable.write_text("#!/bin/sh\nprintf 'go1.26.10\\n'\n"); executable.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": str(tools) + os.pathsep + os.environ["PATH"]}):
+            with self.assertRaises(RuntimeError): binding.compiler_contract(self.product)
+            executable.write_text("#!/bin/sh\nprintf 'go1.26.11\\n'\n")
+            self.assertEqual(binding.compiler_contract(self.product)["go_sdk"], "go1.26.11")
+
+    def test_both_module_toolchains_must_be_exactly_active(self):
+        for path, module, old in [("go.mod", "github.com/bright-interaction/brightcrm", "1.26.10"),
+                                  ("voip/go.mod", "brightcrm-voip", "1.26.6")]:
+            with self.subTest(path=path):
+                self.write_module(path, module, old)
+                with self.assertRaises(RuntimeError): self.verify()
+                self.write_module(path, module)
+
+    def test_every_secondary_docker_go_builder_must_be_active(self):
+        path = self.product / "tools/helper.Dockerfile"; path.parent.mkdir()
+        path.write_text("FROM golang:1.26.11-alpine AS helper\nFROM helper AS inherited\n")
+        self.assertEqual(len(self.verify()["docker_go_builders"]), 3)
+        for compiler in ("1.26.7", "1.26.10", "1.26.12"):
+            with self.subTest(compiler=compiler):
+                path.write_text(f"FROM golang:{compiler}-alpine AS hidden\n")
+                with self.assertRaises(RuntimeError): self.verify()
+
+    def test_fake_variable_or_ambiguous_builder_cannot_satisfy_contract(self):
+        for source in ("FROM alpine:3.21\nRUN echo safe \\\nFROM golang:1.26.11-alpine\n",
+                       "FROM golang:${GO_VERSION}-alpine AS backend\n", "FROM private/compiler:1.26.11\n",
+                       "FROM golang:1.26.11-alpine AS same\nFROM alpine:3.21 AS same\n",
+                       "FROM golang:1.26.11-alpine\nRUN <<EOF\nFROM golang:1.26.10-alpine\nEOF\n"):
+            with self.subTest(source_hash=hashlib.sha256(source.encode()).hexdigest()):
+                (self.product / "Dockerfile").write_text(source)
+                with self.assertRaises(RuntimeError): self.verify()
+
+    def test_unknown_module_duplicate_toolchain_and_excessive_minimum_refuse(self):
+        self.write_module("extra/go.mod", "example.test/unregistered")
+        with self.assertRaises(RuntimeError): self.verify()
+        (self.product / "extra/go.mod").unlink()
+        with (self.product / "go.mod").open("a") as stream: stream.write("toolchain go1.26.11\n")
+        with self.assertRaises(RuntimeError): self.verify()
+        self.write_module("go.mod", "github.com/bright-interaction/brightcrm", minimum="1.27.0")
+        with self.assertRaises(RuntimeError): self.verify()
+
+
+class EmbeddedCompilerControls(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.binary = self.root / "fixture"
+        self.binary.write_bytes(b"synthetic bounded binary")
+
+    def output(self, version="go1.26.11", body=None, code=0, mutate=False):
+        def run(command, **kwargs):
+            self.assertEqual(command, ["go", "version", "-m", str(self.binary)])
+            self.assertEqual(kwargs["timeout"], 30)
+            self.assertEqual(kwargs["env"]["GOTOOLCHAIN"], "local")
+            raw = body if body is not None else (str(self.binary) + ": " + version +
+                  "\n\tpath\texample.invalid/synthetic\n\tbuild\t-compiler=gc\n").encode()
+            kwargs["stdout"].write(raw)
+            if mutate: self.binary.write_bytes(b"changed output")
+            return subprocess.CompletedProcess(command, code, b"", b"private diagnostic")
+        return run
+
+    def inspect(self, **kwargs):
+        return binding.inspect_go_binary(self.binary, results_root=self.root, **kwargs)
+
+    def test_exact_embedded_compiler_passes_without_executing_output(self):
+        with mock.patch.object(binding.subprocess, "run", side_effect=self.output()):
+            result = self.inspect()
+        self.assertEqual(result, {"go_version": "go1.26.11", "bytes": self.binary.stat().st_size,
+                                  "sha256": hashlib.sha256(self.binary.read_bytes()).hexdigest()})
+
+    def test_old_future_devel_missing_malformed_and_unbounded_metadata_refuse(self):
+        outputs = [self.output(version) for version in ("go1.26.10", "go1.26.12", "devel go1.26.11", "")]
+        outputs += [self.output(body=b"not a Go executable\n"), self.output(body=b"\xff"),
+                    self.output(body=b"x" * (1024 * 1024 + 1)), self.output(code=1)]
+        for output in outputs:
+            with self.subTest(), mock.patch.object(binding.subprocess, "run", side_effect=output), self.assertRaises(RuntimeError):
+                self.inspect()
+
+    def test_changed_binary_and_probe_timeout_refuse(self):
+        with mock.patch.object(binding.subprocess, "run", side_effect=self.output(mutate=True)), self.assertRaises(RuntimeError):
+            self.inspect()
+        with mock.patch.object(binding.subprocess, "run", side_effect=subprocess.TimeoutExpired("go", 30)), self.assertRaises(RuntimeError):
+            self.inspect()
+
+    def test_linked_empty_oversized_nonprivate_or_outside_output_refuses(self):
+        with self.assertRaises(RuntimeError): self.inspect(max_bytes=1)
+        self.binary.write_bytes(b"")
+        with self.assertRaises(RuntimeError): self.inspect()
+        self.binary.unlink(); self.binary.symlink_to(self.root / "missing")
+        with self.assertRaises(RuntimeError): self.inspect()
+        self.binary.unlink(); self.binary.write_bytes(b"synthetic")
+        self.root.chmod(0o755)
+        with self.assertRaises(RuntimeError): self.inspect()
+        self.root.chmod(0o700)
+        with self.assertRaises(RuntimeError): binding.inspect_go_binary(self.binary, results_root=self.root / "elsewhere")
+
+    def test_real_go_output_metadata_is_read_without_running_the_binary(self):
+        source = self.root / "fixture.go"
+        source.write_text('package main\nfunc main(){ panic("must never execute") }\n')
+        # The other controls use a non-object placeholder. Go deliberately
+        # refuses to overwrite that file, so the real build needs a fresh path.
+        self.binary.unlink()
+        env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT") if name in os.environ}
+        env.update(GOTOOLCHAIN="local", GOWORK="off", GOPROXY="off", GOSUMDB="off", GOENV="off")
+        built = subprocess.run(["go", "build", "-o", str(self.binary), str(source)], cwd=self.root, env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        self.assertEqual(built.returncode, 0, "Synthetic Go readback fixture must compile: " +
+                         built.stderr.decode(errors="replace")[-8192:])
+        self.assertEqual(self.inspect()["go_version"], "go1.26.11")
 
 
 if __name__ == "__main__":

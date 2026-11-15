@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c",
+  "source_commit": "7f6500863f1f3c0cdcdd162e0cef1f512b87559d",
   "inputs": [
     {
       "path": "stage/userworkflows/ci_brightcrm_toolchain.go",
@@ -19,13 +19,13 @@
     },
     {
       "path": "stage/userworkflows/ci_go.go",
-      "blob": "a53df912410ccd72cd0d3dcaf402df41720384c7",
-      "sha256": "a90112100b9b77e3d1abd3b2920503258c42d9932b3f91e866491d425654f150"
+      "blob": "7ed871685de354f685b017edd0af38e4a9e5e79a",
+      "sha256": "a34c8e6271318873ab58509861fdd3763975a348318711b1f4ea7b7a89264623"
     },
     {
       "path": "stage/userworkflows/ci_go_toolchain_parity_test.go",
-      "blob": "9ba14c6fd64cfa6a1187912cf88cf27a55e31ecf",
-      "sha256": "b21faca0acc8f8bdf1d2c123712716d73665fe71833ceb8dcfdc31da9a66f4d0"
+      "blob": "9e07bb214ac61d6012234ae4ddf99eebb92588f2",
+      "sha256": "b65abca922521d953bc5e75db4bd65637151b53278fe58a5d7dc1c476dfc07da"
     },
     {
       "path": "stage/userworkflows/component_impact.go",
@@ -39,8 +39,8 @@
     },
     {
       "path": "stage/userworkflows/product_policy.go",
-      "blob": "1fd28fa14a89ce7301c4507d196829bdb5909f4c",
-      "sha256": "975f55fec1d1328ce95be1e17ba12eed7617860447d094152d71ba5fafa45276"
+      "blob": "7b56ba8c946f1db27e30ca738a63f55e24aefb2b",
+      "sha256": "ae6f84d54739e0c315468435de32df6b1efe6ef135c1c65a1249c1ca48893c23"
     },
     {
       "path": "stage/userworkflows/repo_coverage_registry.go",
@@ -49,8 +49,8 @@
     },
     {
       "path": "stage/userworkflows/repo_coverage_scope.go",
-      "blob": "f247f0fb805f231cf8fc9597e19d5daec1a27c5a",
-      "sha256": "8bb97e56a7b87935d667d387fc3c59d5731e4ef85aa7dfe6e0727b61bfccdea7"
+      "blob": "4d185546827609af4a653d9f6a57c234f8925f8e",
+      "sha256": "3d8c13437a51caffee87277573fea2503f3ed39ed4bed6a69c78967babde80f2"
     },
     {
       "path": "stage/userworkflows/security_coverage_test.go",
@@ -72,5 +72,6 @@
       "blob": "415c0d1d2312b2ca8dc7a378c59ec00ac759504b",
       "sha256": "d62990d734f589a42414552f8c419c540f20e419aa08d7c61118c83f74883e93"
     }
-  ]
+  ],
+  "native_controller_profile": "deployed-native-relay-7-9-10-v1"
 }

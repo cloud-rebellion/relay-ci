@@ -25,8 +25,8 @@ func write(t *testing.T, root, path, body string) {
 func cleanFixture(t *testing.T) (string, policy) {
 	t.Helper()
 	root := t.TempDir()
-	write(t, root, "brightcrm/go.mod", "module github.com/bright-interaction/brightcrm\n\ngo 1.26.3\n\ntoolchain go1.26.10\n")
-	write(t, root, "brightcrm/Dockerfile", "FROM golang:1.26.10-alpine AS builder\nRUN go build ./cmd/server\nFROM alpine:3.23\n")
+	write(t, root, "brightcrm/go.mod", "module github.com/bright-interaction/brightcrm\n\ngo 1.26.3\n\ntoolchain go1.26.11\n")
+	write(t, root, "brightcrm/Dockerfile", "FROM golang:1.26.11-alpine AS builder\nRUN go build ./cmd/server\nFROM alpine:3.23\n")
 	write(t, root, "ops/scripts/nocodb-to-espocrm-import.py", "import os\nkey = os.environ[\"ESPOCRM_API_KEY\"]\n")
 	p := policy{
 		services: []string{"brightcrm"}, trivy: []string{"brightcrm"},
@@ -54,7 +54,7 @@ func assertResult(t *testing.T, r report, name, status string) result {
 func TestCleanAndExplicitApplicability(t *testing.T) {
 	root, p := cleanFixture(t)
 	r := runGuards(root, p)
-	if r.Status != "passed" || len(r.Assertions) != 10 {
+	if r.Status != "passed" || len(r.Assertions) != 10 || r.NativeControllerProfile != deployedNativeRelay7910Profile || r.NativeGo11Admitted || !r.PublicGo11Required {
 		t.Fatalf("clean profile not qualified: %+v", r)
 	}
 	for _, index := range []int{0, 3, 4, 6} {
@@ -171,14 +171,14 @@ func TestRaceParityExactTokens(t *testing.T) {
 func TestCompilerRefusals(t *testing.T) {
 	cases := []struct{ name, path, body string }{
 		{"older-builder", "brightcrm/Dockerfile", "FROM golang:1.26.7-alpine AS builder\nFROM alpine:3.23\n"},
-		{"newer-builder", "brightcrm/Dockerfile", "FROM golang:1.26.11-alpine AS builder\nFROM alpine:3.23\n"},
+		{"newer-builder", "brightcrm/Dockerfile", "FROM golang:1.26.12-alpine AS builder\nFROM alpine:3.23\n"},
 		{"nested-builder", "brightcrm/tools/helper.Dockerfile", "FROM golang:1.26.9-alpine\n"},
 		{"floating-builder", "brightcrm/Dockerfile", "FROM golang:1.26-alpine\n"},
 		{"variable-builder", "brightcrm/Dockerfile", "ARG GO_VERSION\nFROM golang:${GO_VERSION}-alpine\n"},
-		{"fake-from-under-run", "brightcrm/Dockerfile", "FROM alpine:3.23\nRUN echo safe \\\nFROM golang:1.26.10-alpine\n"},
-		{"heredoc", "brightcrm/Dockerfile", "FROM golang:1.26.10-alpine\nRUN <<EOF\necho test\nEOF\n"},
-		{"unsupported-base", "brightcrm/Dockerfile", "FROM golang:1.26.10-alpine\nFROM private/runtime:latest\n"},
-		{"duplicate-alias", "brightcrm/Dockerfile", "FROM golang:1.26.10-alpine AS build\nFROM alpine:3.23 AS build\n"},
+		{"fake-from-under-run", "brightcrm/Dockerfile", "FROM alpine:3.23\nRUN echo safe \\\nFROM golang:1.26.11-alpine\n"},
+		{"heredoc", "brightcrm/Dockerfile", "FROM golang:1.26.11-alpine\nRUN <<EOF\necho test\nEOF\n"},
+		{"unsupported-base", "brightcrm/Dockerfile", "FROM golang:1.26.11-alpine\nFROM private/runtime:latest\n"},
+		{"duplicate-alias", "brightcrm/Dockerfile", "FROM golang:1.26.11-alpine AS build\nFROM alpine:3.23 AS build\n"},
 		{"missing-from", "brightcrm/Dockerfile", "RUN true\n"},
 	}
 	for _, tc := range cases {
@@ -189,10 +189,10 @@ func TestCompilerRefusals(t *testing.T) {
 		})
 	}
 	for _, mod := range []string{
-		"module github.com/bright-interaction/brightcrm\ngo 1.27.0\ntoolchain go1.26.10\n",
-		"module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go1.26.11\n",
-		"module wrong\ngo 1.26.3\ntoolchain go1.26.10\n",
-		"module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go1.26.10\ntoolchain go1.26.10\n",
+		"module github.com/bright-interaction/brightcrm\ngo 1.27.0\ntoolchain go1.26.11\n",
+		"module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go1.26.12\n",
+		"module wrong\ngo 1.26.3\ntoolchain go1.26.11\n",
+		"module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go1.26.11\ntoolchain go1.26.11\n",
 	} {
 		if _, err := toolchainFromModule([]byte(mod)); err == nil {
 			t.Fatal("unreviewed module compiler passed")
@@ -201,7 +201,7 @@ func TestCompilerRefusals(t *testing.T) {
 	t.Run("symlink-input", func(t *testing.T) {
 		root, p := cleanFixture(t)
 		target := filepath.Join(t.TempDir(), "outside")
-		if err := os.WriteFile(target, []byte("FROM golang:1.26.10-alpine\n"), 0600); err != nil {
+		if err := os.WriteFile(target, []byte("FROM golang:1.26.11-alpine\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Remove(filepath.Join(root, "brightcrm/Dockerfile")); err != nil {
@@ -213,6 +213,109 @@ func TestCompilerRefusals(t *testing.T) {
 		assertResult(t, runGuards(root, p), guardNames[5], "failed")
 	})
 }
+func nativePolicyFixture() string {
+	return `package fixture
+func brightCRMReviewedToolchain(version string) (string, bool) {
+ switch version {
+ case "1.26.7": return "golang:1.26.7-alpine", true
+ case "1.26.9": return "golang:1.26.9-alpine", true
+ case "1.26.10": return "golang:1.26.10-alpine", true
+ default: return "", false
+ }
+}`
+}
+func TestDeployedNativeCompilerProfile(t *testing.T) {
+	clean := nativePolicyFixture()
+	file, err := parse([]byte(clean))
+	if err != nil || deployedNativeCompilerPolicy(file) != nil {
+		t.Fatal("exact deployed native7/9/10 selector refused")
+	}
+	cases := map[string]string{
+		"native11-is-not-deployed": strings.Replace(clean, "default:", `case "1.26.11": return "golang:1.26.11-alpine", true; default:`, 1),
+		"future12":                 strings.Replace(clean, "1.26.10", "1.26.12", 1),
+		"wrong-image":              strings.Replace(clean, "golang:1.26.10-alpine", "golang:1.26.11-alpine", 1),
+		"computed-image":           strings.Replace(clean, `"golang:1.26.10-alpine", true`, `imageFor(version), true`, 1),
+		"default-acceptance":       strings.Replace(clean, `"", false`, `"", true`, 1),
+		"default-computed":         strings.Replace(clean, `"", false`, `fallback(version), false`, 1),
+		"missing-default":          strings.Replace(clean, `default: return "", false`, `case "1.26.8": return "", false`, 1),
+		"duplicate-case":           strings.Replace(clean, `case "1.26.9":`, `case "1.26.7":`, 1),
+		"hidden-statement":         strings.Replace(clean, `case "1.26.9": return`, `case "1.26.9": sideEffect(); return`, 1),
+		"duplicate-selector":       clean + strings.TrimPrefix(clean, "package fixture"),
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			file, err := parse([]byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if deployedNativeCompilerPolicy(file) == nil {
+				t.Fatal("unreviewed native selector admitted")
+			}
+		})
+	}
+}
+
+func TestActiveCompilerFloor(t *testing.T) {
+	for _, version := range []string{"go1.26.7", "go1.26.9", "go1.26.10", "go1.26.12", "go1.26", "devel go1.26.11", "go1.26.11 X:boringcrypto"} {
+		t.Run("host-"+version, func(t *testing.T) {
+			if requireActiveHostCompiler(version) == nil {
+				t.Fatal("nonexact host SDK passed active profile")
+			}
+		})
+	}
+	if err := requireActiveHostCompiler("go1.26.11"); err != nil {
+		t.Fatal("exact active host SDK refused")
+	}
+	root, _ := cleanFixture(t)
+	write(t, root, "brightcrm/voip/go.mod", "module github.com/bright-interaction/brightcrm-voip\ngo 1.26.3\ntoolchain go1.26.11\n")
+	write(t, root, "brightcrm/voip/Dockerfile", "FROM golang:1.26.11-alpine AS builder\nFROM alpine:3.23\n")
+	if builders, findings, err := compilerParity(root); err != nil || builders != 2 || len(findings) != 0 {
+		t.Fatalf("complete active compiler fixture refused: builders=%d findings=%v err=%v", builders, findings, err)
+	}
+	for _, version := range []string{"1.26.7", "1.26.9", "1.26.10", "1.26.12"} {
+		t.Run("module-"+version, func(t *testing.T) {
+			raw := []byte("module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go" + version + "\n")
+			if _, err := toolchainFromModule(raw); err == nil {
+				t.Fatal("nonexact module compiler passed active profile")
+			}
+		})
+		t.Run("nested-builder-"+version, func(t *testing.T) {
+			write(t, root, "brightcrm/voip/Dockerfile", "FROM golang:"+version+"-alpine\n")
+			_, findings, err := compilerParity(root)
+			if err == nil && len(findings) == 0 {
+				t.Fatal("nonexact nested builder passed active profile")
+			}
+		})
+	}
+}
+func TestHistoricalCompilerProfile(t *testing.T) {
+	for _, version := range []string{"1.26.7", "1.26.9", "1.26.10"} {
+		t.Run(version, func(t *testing.T) {
+			root, _ := cleanFixture(t)
+			module := "module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go" + version + "\n"
+			write(t, root, "brightcrm/go.mod", module)
+			write(t, root, "brightcrm/Dockerfile", "FROM golang:"+version+"-alpine AS build\nFROM build AS verify\nFROM alpine:3.23\n")
+			if _, findings, err := compilerParityFor(root, historicalCompilerProfile); err != nil || len(findings) != 0 {
+				t.Fatalf("explicit historical fixture refused: %v %v", findings, err)
+			}
+			if _, err := toolchainFromModule([]byte(module)); err == nil {
+				t.Fatal("historical fixture qualified active release")
+			}
+			write(t, root, "brightcrm/nested/helper.Dockerfile", "FROM golang:1.26.11-alpine\n")
+			if _, findings, err := compilerParityFor(root, historicalCompilerProfile); err == nil && len(findings) == 0 {
+				t.Fatal("historical compiler mismatch passed")
+			}
+		})
+	}
+	active := []byte("module github.com/bright-interaction/brightcrm\ngo 1.26.3\ntoolchain go1.26.11\n")
+	if _, err := toolchainFromModuleFor(active, historicalCompilerProfile); err == nil {
+		t.Fatal("active cohort silently became historical")
+	}
+	if _, err := toolchainFromModuleFor(active, compilerProfile(99)); err == nil {
+		t.Fatal("unknown profile passed")
+	}
+}
+
 func TestProviderAndContextCredentialControls(t *testing.T) {
 	root, p := cleanFixture(t)
 	provider := "AKIA" + "IOSFODNN7EXAMPLE"
@@ -318,6 +421,9 @@ func TestRegistryCannotOmitDuplicateOrAddSelectedGuard(t *testing.T) {
 		{"different-owned-root", "component_impact.go", `package fixture; var componentDefinitions=[]T{{program:"brightcrm",root:"other",goTarget:"brightcrm"}}`},
 		{"changed-trigger", "deploy_brightcrm.go", `package fixture; func brightcrmDeploySpec()T{return T{Trigger:sdk.Push{}}}`},
 		{"missing-rules", "security_gate.go", `package fixture; var secretScanFileGlobs=[]string{"*.go"}`},
+		{"native-selector-widened", "ci_brightcrm_toolchain.go", strings.Replace(nativePolicyFixture(), "1.26.10", "1.26.11", 1)},
+		{"native-selector-missing", "ci_brightcrm_toolchain.go", `package fixture; func different() {}`},
+		{"native-selector-default-allows", "ci_brightcrm_toolchain.go", strings.Replace(nativePolicyFixture(), `"", false`, `"", true`, 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inputs := policyASTFixture(t)
@@ -336,11 +442,12 @@ func TestRegistryCannotOmitDuplicateOrAddSelectedGuard(t *testing.T) {
 func policyASTFixture(t *testing.T) map[string]*ast.File {
 	t.Helper()
 	sources := map[string]string{
-		"ci_go.go":            registrySource("") + `var ciGoServices=[]string{"brightcrm"};var ciGoExempt=map[string]string{}`,
-		"ci_contract_test.go": `package fixture;var ciExempt=map[string]string{};var ciRaceParityDebt=map[string]string{}`,
-		"component_impact.go": `package fixture;var componentDefinitions=[]T{{program:"brightcrm",root:"brightcrm",goTarget:"brightcrm"}}`,
-		"security_trivy.go":   `package fixture;var securityTrivyServices=[]string{"brightcrm"}`,
-		"deploy_brightcrm.go": `package fixture;func brightcrmDeploySpec()T{return T{Trigger:sdk.Manual{}}}`,
+		"ci_go.go":                  registrySource("") + `var ciGoServices=[]string{"brightcrm"};var ciGoExempt=map[string]string{}`,
+		"ci_contract_test.go":       `package fixture;var ciExempt=map[string]string{};var ciRaceParityDebt=map[string]string{}`,
+		"component_impact.go":       `package fixture;var componentDefinitions=[]T{{program:"brightcrm",root:"brightcrm",goTarget:"brightcrm"}}`,
+		"security_trivy.go":         `package fixture;var securityTrivyServices=[]string{"brightcrm"}`,
+		"deploy_brightcrm.go":       `package fixture;func brightcrmDeploySpec()T{return T{Trigger:sdk.Manual{}}}`,
+		"ci_brightcrm_toolchain.go": nativePolicyFixture(),
 		"security_gate.go": `package fixture
 const hardcodedAPIKeyPattern="AKIA[0-9A-Z]{16}"
 var secretScanFileGlobs=[]string{"*.go"}
@@ -369,8 +476,8 @@ func TestProvenanceMissingTamperedAndUnboundedInput(t *testing.T) {
 	if _, err := loadInputs(root, origin); err == nil {
 		t.Fatal("missing provenance passed")
 	}
-	names := []string{"ci_brightcrm_toolchain.go", "ci_contract_test.go", "ci_coverage_test.go", "ci_go.go", "ci_go_toolchain_parity_test.go", "component_impact.go", "deploy_brightcrm.go", "product_policy.go", "repo_coverage_registry.go", "repo_coverage_scope.go", "security_coverage_test.go", "security_gate.go", "security_gate_scan_test.go", "security_trivy.go"}
-	pins := provenance{Schema: 1, SourceCommit: strings.Repeat("a", 40)}
+	names := append([]string{}, requiredNativeInputNames...)
+	pins := provenance{Schema: 1, NativeControllerProfile: deployedNativeRelay7910Profile, SourceCommit: strings.Repeat("a", 40)}
 	for _, name := range names {
 		path := "stage/userworkflows/" + name
 		raw := []byte("package fixture\n")
@@ -388,6 +495,40 @@ func TestProvenanceMissingTamperedAndUnboundedInput(t *testing.T) {
 	if _, err := loadInputs(root, origin); err != nil {
 		t.Fatalf("bounded exact source rejected: %v", err)
 	}
+	for name, mutate := range map[string]func(*provenance){
+		"missing-profile":                          func(p *provenance) { p.NativeControllerProfile = "" },
+		"unknown-profile":                          func(p *provenance) { p.NativeControllerProfile = "native11-or-auto" },
+		"omitted-required-pin":                     func(p *provenance) { p.Inputs = p.Inputs[1:] },
+		"unreleased-helper-in-place-of-native-pin": func(p *provenance) { p.Inputs[0].Path = "stage/userworkflows/deploy_brightcrm_compiler.go" },
+		"legacy-fifteen-input-closure": func(p *provenance) {
+			p.Inputs = append(p.Inputs, sourcePin{"stage/userworkflows/deploy_brightcrm_compiler.go", p.Inputs[0].Blob, p.Inputs[0].SHA256})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := pins
+			candidate.Inputs = append([]sourcePin{}, pins.Inputs...)
+			mutate(&candidate)
+			body, err := json.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(origin, body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadInputs(root, origin); err == nil {
+				t.Fatal("unknown/partial native profile passed")
+			}
+		})
+	}
+	if err := os.WriteFile(origin, append(append([]byte{}, raw...), []byte(" {}")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadInputs(root, origin); err == nil {
+		t.Fatal("trailing provenance passed")
+	}
+	if err := os.WriteFile(origin, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
 	write(t, root, pins.Inputs[0].Path, "package changed\n")
 	if _, err := loadInputs(root, origin); err == nil {
 		t.Fatal("same-path payload tamper passed")
@@ -403,6 +544,7 @@ func TestProvenanceMissingTamperedAndUnboundedInput(t *testing.T) {
 	if _, err := loadInputs(root, origin); err == nil {
 		t.Fatal("oversize private source passed")
 	}
+	write(t, root, pins.Inputs[0].Path, "package fixture\n")
 	pins.Inputs = pins.Inputs[:13]
 	raw, err = json.Marshal(pins)
 	if err != nil {

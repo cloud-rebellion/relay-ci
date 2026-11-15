@@ -17,6 +17,7 @@ REQUIRED_CONTROLS = {
     "TestCredentialCandidateClassification", "TestOperationalExternalCredentialMarker",
     "TestRegistryCannotOmitDuplicateOrAddSelectedGuard",
     "TestProvenanceMissingTamperedAndUnboundedInput",
+    "TestActiveCompilerFloor", "TestHistoricalCompilerProfile", "TestDeployedNativeCompilerProfile",
 }
 
 
@@ -44,6 +45,19 @@ def validate_controls(path):
         raise RuntimeError("A required governance control was omitted")
     return {"top_level": len({name for name in passed if "/" not in name}),
             "outcomes": outcomes, "skipped": 0}
+
+
+NATIVE_PROFILE = "deployed-native-relay-7-9-10-v1"
+
+
+def validate_helper_report(report):
+    results = report.get("assertions", [])
+    if report.get("status") != "passed" or report.get("selected_guard_count") != 10 or len(results) != 10 or \
+            len({entry.get("name") for entry in results}) != 10 or \
+            any(entry.get("status") != "passed" for entry in results) or \
+            report.get("native_controller_profile") != NATIVE_PROFILE or \
+            report.get("native_go11_admitted") is not False or report.get("public_go11_required") is not True:
+        raise RuntimeError("Required governance assertions or finite compiler provenance missing")
 
 
 def output_directory(value, harness=HARNESS):
@@ -95,11 +109,9 @@ def main():
                       str(HERE / "source-origin.json"), "--report", str(helper_report_path)],
                      HERE, directory, "governance-check", env)
     report = json.loads(helper_report_path.read_text())
-    results = report.get("assertions", [])
-    if status or report.get("status") != "passed" or report.get("selected_guard_count") != 10 or len(results) != 10 or \
-            len({entry.get("name") for entry in results}) != 10 or \
-            any(entry.get("status") != "passed" for entry in results):
-        raise RuntimeError("Required governance assertions failed or were omitted")
+    if status:
+        raise RuntimeError("Required governance helper refused qualification")
+    validate_helper_report(report)
     if verify(initial=False) != identity:
         raise RuntimeError("Source binding changed during governance validation")
     report.update(identity, controls={"status": "passed", **counts}, status="passed")

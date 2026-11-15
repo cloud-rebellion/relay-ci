@@ -23,7 +23,7 @@ class GovernanceDriverControls(unittest.TestCase):
             return DRIVER.validate_controls(path)
 
     def test_complete_controls_have_real_counts(self):
-        self.assertEqual(self.validate(self.events()), {"top_level": 10, "outcomes": 10, "skipped": 0})
+        self.assertEqual(self.validate(self.events()), {"top_level": 13, "outcomes": 13, "skipped": 0})
 
     def test_missing_skipped_failed_duplicate_or_nonterminal_is_refused(self):
         events = self.events()
@@ -36,6 +36,24 @@ class GovernanceDriverControls(unittest.TestCase):
             with self.subTest(mutation=len(mutated)):
                 with self.assertRaises(RuntimeError):
                     self.validate(mutated)
+
+    def test_compiler_provenance_is_explicit_and_cannot_claim_native_go11(self):
+        report = {"status": "passed", "selected_guard_count": 10,
+                  "assertions": [{"name": str(index), "status": "passed"} for index in range(10)],
+                  "native_controller_profile": DRIVER.NATIVE_PROFILE,
+                  "native_go11_admitted": False, "public_go11_required": True}
+        DRIVER.validate_helper_report(report)
+        for key, value in (("native_controller_profile", "native11-or-auto"),
+                           ("native_go11_admitted", True), ("native_go11_admitted", None),
+                           ("public_go11_required", False), ("public_go11_required", None)):
+            candidate = dict(report, **{key: value})
+            with self.subTest(key=key, value=value), self.assertRaises(RuntimeError):
+                DRIVER.validate_helper_report(candidate)
+        for key in ("native_controller_profile", "native_go11_admitted", "public_go11_required"):
+            candidate = dict(report)
+            del candidate[key]
+            with self.subTest(omitted=key), self.assertRaises(RuntimeError):
+                DRIVER.validate_helper_report(candidate)
 
     def test_output_stays_outside_trusted_and_private_source(self):
         with tempfile.TemporaryDirectory() as directory:

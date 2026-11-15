@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 
 from common import PRODUCT, PINS, capture, require_ephemeral_workspace, require_success, results_directory, source_sha, test_environment
+from binding import inspect_go_binary
 
 require_ephemeral_workspace()
 module = PRODUCT / "voip"
@@ -38,8 +39,7 @@ binaries = []
 for process in ["api", "sip", "webrtc"]:
     output = directory / "bin" / ("relay-voip-" + process)
     require_success(["go", "build", "-o", str(output), "./cmd/" + process], "voip-build-" + process, module, env)
-    binaries.append({"process": process, "bytes": output.stat().st_size,
-                     "sha256": hashlib.sha256(output.read_bytes()).hexdigest()})
+    binaries.append({"process": process, **inspect_go_binary(output, results_root=directory)})
 (directory / "voip-summary.json").write_text(json.dumps({"source_sha": source_sha(), "go": version,
                                                         "source_origin_sha256": hashlib.sha256((module / "SOURCE-ORIGIN.json").read_bytes()).hexdigest(),
                                                         "packages": outcomes, "binaries": binaries, "status": "passed"}, indent=2) + "\n")

@@ -9,13 +9,13 @@
   "allowed_workflow_refs": [
     "refs/heads/main"
   ],
-  "context_commit": "f9dfed6fc82971dbd736e5e4898b2edd418e836b",
+  "context_commit": "655c87fed16ef6757d563c49e3bdbd400c27da05",
   "context_manifest_path": "relay-ci-context.json",
-  "context_manifest_sha256": "f9d16a41eb6857354783dd9b9b25744481bf46c95c2c14e36dadce95aaad115e",
+  "context_manifest_sha256": "15d5820729b9f900c499a6695178d53a89e7561b6be331dd92182de897c65e87",
   "context_metadata_paths": [
     "relay-ci-context.json"
   ],
-  "context_tree": "185f6f56835ab08cbfc19d05c07290491917abc9",
+  "context_tree": "7e72d94b3de1313633f48f30223c150d94dc63b6",
   "execution_roots": [
     "brightcrm",
     "ops"
@@ -23,13 +23,13 @@
   "github_ssh_host_key_source": "https://api.github.com/meta",
   "github_ssh_known_hosts": "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n",
   "github_ssh_known_hosts_sha256": "6233fddbb0a29afc8c4e8c699733c1a188c3a41f2fb63a2640653dc4aea624ce",
-  "origin_stage_commit": "ea141317f750b974f114b16ec50c7a0c9d41f93c",
+  "origin_stage_commit": "1fc29087366c7c67d97e3278071ed7cd09177d99",
   "private_repository": "cloud-rebellion/relay",
   "private_repository_id": 1447574877,
   "public_repository": "cloud-rebellion/relay-ci",
   "public_repository_id": 1457664829,
   "schema": 1,
-  "source_bytes": 21721363,
-  "source_entry_count": 2059,
+  "source_bytes": 21741416,
+  "source_entry_count": 2061,
   "status": "pinned"
 }

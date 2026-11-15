@@ -10,6 +10,7 @@ import time
 import uuid
 
 from common import PRODUCT, PINS, capture, require_success, results_directory, source_sha, test_environment
+from binding import inspect_go_binary
 
 if os.environ.get("GITHUB_ACTIONS") != "true":
     raise RuntimeError("Backend fixture orchestration requires an ephemeral GitHub Actions runner")
@@ -29,6 +30,10 @@ require_success(["docker", "compose", "version"], "compose-readiness", env=env)
 require_success(["go", "mod", "download"], "go-mod-download", env=env)
 env.update(GOPROXY="off", CGO_ENABLED="1")
 require_success(["go", "vet", "./..."], "go-vet", env=env)
+binary = directory / "relay-core-server"
+require_success(["go", "build", "-o", str(binary), "./cmd/server"], "core-server-build", env=env)
+binary_metadata = inspect_go_binary(binary, results_root=directory)
+binary.unlink()
 
 owner = uuid.uuid4().hex
 prefix = "relay-ci-" + owner
@@ -172,6 +177,7 @@ finally:
         raise RuntimeError("Owned fixture cleanup was not verified")
 
 (directory / "backend-summary.json").write_text(json.dumps({"source_sha": source_sha(), "go": version,
+                                                           "server_binary": binary_metadata,
                                                            "schema": expected_version, "packages": outcomes,
                                                            "invitation_proved": True, "status": "passed"}, indent=2) + "\n")
 print(f"Relay backend: {len(outcomes)} complete packages passed; real invitation proof present")
