@@ -1,7 +1,7 @@
 {
   "version": 1,
   "qualified_source_commit": "6fc1ee5dd0cb1449f63a39a2748a60faa431e1c1",
-  "expectedTests": 97,
+  "expectedTests": 102,
   "cases": [
     {
       "file": "auth-loading.spec.ts",
@@ -350,6 +350,26 @@
     {
       "file": "scheduled-report-authority.spec.ts",
       "title": "queued and legacy report statuses never claim delivery or display raw historical counts and errors"
+    },
+    {
+      "file": "team-invitations.spec.ts",
+      "title": "invitation management lists pending expired and revoked states and respects resend cooldown"
+    },
+    {
+      "file": "team-invitations.spec.ts",
+      "title": "invitation resend reveals only the returned fresh manual link and refreshes metadata"
+    },
+    {
+      "file": "team-invitations.spec.ts",
+      "title": "invitation revoke requires confirmation then removes the pending link from the open list"
+    },
+    {
+      "file": "team-invitations.spec.ts",
+      "title": "nonadministrator cannot list or manage invitations in the team screen"
+    },
+    {
+      "file": "team-invitations.spec.ts",
+      "title": "queued invitation resend never claims email delivery and failed resend remains retryable"
     },
     {
       "file": "website-pairing.spec.ts",

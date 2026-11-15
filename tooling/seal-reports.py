@@ -106,9 +106,9 @@ def safe_summary(profile, gate, directory):
             governance = read("governance-summary.json")
             if governance.get("selected_guard_count") != 10:
                 raise RuntimeError("Complete selected governance proof missing")
-            if front.get("browser_passes") != 97 or back.get("invitation_proved") is not True:
+            if front.get("browser_passes") != 102 or back.get("invitation_proved") is not True:
                 raise RuntimeError("Complete browser/invitation proof missing")
-            result["counts"] = {"selected_governance_guards": 10, "browser_passes": 97, "go_packages": len(back["packages"]),
+            result["counts"] = {"selected_governance_guards": 10, "browser_passes": 102, "go_packages": len(back["packages"]),
                                 "go_test_outcomes": sum(x["test_outcomes"] for x in back["packages"])}
         elif gate == "voip":
             item = read("voip-summary.json")
