@@ -25,6 +25,7 @@ from daemon_policy import (CONFIG, CONFIG_PATH, DB_PATH, MARKER, SECOND, MEMORY,
 from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
 from freshclam_check import check_inherited
 from direct_fixtures import (CONTROL_COUNT as FIXTURE_CONTROL_COUNT, FixtureDaemon, prepare_host_tools, build_corpus, scan_corpus)
+from zip_diagnostics import (CONTROL_COUNT as ZIP_DIAGNOSTIC_COUNT, make_matrix, observe_matrix)
 
 KIND = "relay-public-scanner-daemon-subset-v1"
 CONTROL_COUNT = 41
@@ -47,8 +48,9 @@ def owned_results():
     require({x.name for x in root.iterdir()} == {"daemon-controls.stdout", "daemon-controls.stderr",
             "daemon-controls-summary.json", "scanner-controls.stdout", "scanner-controls.stderr",
             "scanner-controls-summary.json", "direct-fixtures-controls.stdout", "direct-fixtures-controls.stderr",
-            "direct-fixtures-controls-summary.json"}, "phase1-fresh-results-files")
-    for name, count in (("daemon", CONTROL_COUNT), ("scanner", 42), ("direct-fixtures", FIXTURE_CONTROL_COUNT)):
+            "direct-fixtures-controls-summary.json", "zip-diagnostics-controls.stdout", "zip-diagnostics-controls.stderr",
+            "zip-diagnostics-controls-summary.json"}, "phase1-fresh-results-files")
+    for name, count in (("daemon", CONTROL_COUNT), ("scanner", 42), ("direct-fixtures", FIXTURE_CONTROL_COUNT), ("zip-diagnostics", ZIP_DIAGNOSTIC_COUNT)):
         require(document((root / (name + "-controls-summary.json")).read_bytes()) ==
                 {"schema": 1, "tests": count, "failures": 0, "errors": 0, "skips": 0, "status": "passed"},
                 "phase1-closed-controls-not-passed")
@@ -184,12 +186,14 @@ def assess(root, profile):
         record(root, "phase1-oci-custody", custody)
         fixture_tools = prepare_host_tools(daemon, root)
         fixture_corpus = build_corpus(daemon, fixture_tools)
+        zip_matrix = make_matrix(daemon)
         phases, observations = [], []
         with PrivateEgress(daemon) as network, OwnedTrace(daemon) as trace, Candidate(daemon, network, config) as candidate:
             candidate.start()
             candidate.ready()
             phases.append(witness(candidate, trace, root, "initial-load"))
             write_signature(candidate)
+            observe_matrix(candidate, zip_matrix, root)  # Diagnostics never replace or clear strict cases below.
             observations.append({"phase": "first-test-signature-reload", "cases": cases(candidate),
                 "direct_fixtures": scan_corpus(candidate, fixture_corpus, root, "first-reload")})
             phases.append(witness(candidate, trace, root, "first-reload"))
