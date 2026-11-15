@@ -31,9 +31,12 @@ def parsed():
             "\nConfig file: freshclam.conf\nChecks = 4\n").encode()
 
 
-def trace(pid=123):
+def trace(pid=123, syscall="openat"):
+    opening = {"open": 'open("/etc/clamav/clamd.conf", O_RDONLY)',
+               "openat": 'openat(AT_FDCWD, "/etc/clamav/clamd.conf", O_RDONLY)',
+               "openat2": 'openat2(AT_FDCWD, "/etc/clamav/clamd.conf", {flags=O_RDONLY}, 24)'}[syscall]
     return (str(pid) + ' execve("/usr/local/sbin/clamd", ["clamd", "--foreground"], 0x1 /* 24 vars */) = 0\n' +
-            str(pid) + ' openat(AT_FDCWD, "/etc/clamav/clamd.conf", O_RDONLY) = 4\n').encode()
+            str(pid) + " " + opening + " = 4\n").encode()
 
 
 def resources():
@@ -88,17 +91,41 @@ class DaemonControls(unittest.TestCase):
             policy.config_witness(configuration(), parsed().replace(b"Config file: clamd.conf", b"Config file: other.conf"))
 
     def test_actual_pid_exec_and_successful_config_open(self):
-        self.assertTrue(policy.trace_witness(trace(), 123)["successful_read_open"])
+        for syscall in ("open", "openat", "openat2"):
+            for fd in (0,4,127):
+                raw=trace(syscall=syscall).replace(b"= 4",("= "+str(fd)).encode())
+                with self.subTest(syscall=syscall,fd=fd):
+                    result=policy.trace_witness(raw,123)
+                    self.assertTrue(result["successful_read_open"])
+                    self.assertEqual(result["actual_clamd_host_pid"],123)
+                    self.assertEqual(result["actual_opened_config"],policy.CONFIG_PATH)
+            with self.subTest(syscall=syscall,flags="cloexec"):
+                policy.trace_witness(trace(syscall=syscall).replace(b"O_RDONLY",b"O_RDONLY|O_CLOEXEC"),123)
 
     def test_foreign_pid_or_failed_open_cannot_clear_witness(self):
-        for raw, pid in ((trace(124), 123), (trace().replace(b"= 4", b"= -1 ENOENT (No such file)"), 123),
-                         (trace().replace(b"/etc/clamav/clamd.conf", b"/tmp/other.conf"), 123)):
-            with self.subTest(raw=raw), self.assertRaises(Refusal):
-                policy.trace_witness(raw, pid)
+        for syscall in ("open", "openat", "openat2"):
+            raw=trace(syscall=syscall)
+            variants=[(trace(124,syscall),123),
+                (raw.replace(b"= 4",b"= -1 ENOENT (No such file)"),123),
+                (raw.replace(b"= 4",b"= ?"),123),(raw.replace(b"= 4",b"= 4garbage"),123),
+                (raw.replace(b"/etc/clamav/clamd.conf",b"/tmp/other.conf"),123),
+                (raw.replace(b"O_RDONLY",b"O_CLOEXEC"),123),
+                (raw.replace(b"execve(",b"failed_execve(").replace(b" = 0",b" = -1 EACCES"),123),
+                (raw.replace((" "+syscall+"(").encode(),(" fake"+syscall+"(").encode()),123)]
+            for body,pid in variants:
+                with self.subTest(syscall=syscall,body=body),self.assertRaises(Refusal):
+                    policy.trace_witness(body,pid)
+        # A lookalike pathname embedded later in another call's arguments is not the config pathname.
+        misleading=trace(syscall="open").splitlines()[0]+b'\n123 open("/tmp/other", O_RDONLY /* "/etc/clamav/clamd.conf" */) = 4\n'
+        with self.assertRaises(Refusal):policy.trace_witness(misleading,123)
 
     def test_daemon_writing_loaded_config_refused(self):
-        with self.assertRaisesRegex(Refusal, "for-write"):
-            policy.trace_witness(trace() + b'123 openat(AT_FDCWD, "/etc/clamav/clamd.conf", O_RDWR) = 5\n', 123)
+        for syscall in ("open", "openat", "openat2"):
+            for flags in (b"O_RDWR",b"O_WRONLY",b"O_RDONLY|O_TRUNC"):
+                raw=trace(syscall=syscall)
+                write=raw.splitlines()[-1].replace(b"O_RDONLY",flags)+b"\n"
+                with self.subTest(syscall=syscall,flags=flags),self.assertRaisesRegex(Refusal,"for-write"):
+                    policy.trace_witness(raw+write,123)
 
     def test_fresh_loaded_signature_date(self):
         self.assertEqual(policy.fresh_version(b"ClamAV 1.5.4/28258/Sun Nov 15 14:00:00 2026\x00", NOW)["age_seconds"], 3600)

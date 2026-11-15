@@ -353,7 +353,7 @@ class OwnedTrace(AbstractContextManager):
                 "--property=RuntimeMaxSec=6600", "--property=LimitFSIZE=8388608",
                 "--property=KillMode=control-group", "--property=TimeoutStopSec=10",
                 "strace", "-f", "-s", "4096", "-e",
-                "trace=openat,openat2,execve,execveat,clone,clone3,fork,vfork", "-o", str(self.path),
+                "trace=open,openat,openat2,execve,execveat,clone,clone3,fork,vfork", "-o", str(self.path),
                 *[part for pid in pids for part in ("-p", str(pid))]])
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:

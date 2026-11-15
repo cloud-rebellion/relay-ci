@@ -75,7 +75,11 @@ def trace_witness(raw, pid):
     selected = [x for x in lines if re.match(r"^" + str(pid) + r"\s", x)]
     require(any(re.search(r'execve\("[^"\n]*/clamd",.*\)\s*=\s*0$', x) for x in selected),
             "actual-clamd-exec-not-witnessed")
-    opens = [x for x in selected if re.search(r'openat2?\(.*"' + re.escape(CONFIG_PATH) + r'"', x)]
+    # musl may use the legacy open syscall for fopen. Admit only these three
+    # kernel forms with the exact pathname argument; PID/read-only/FD checks stay.
+    path = re.escape(CONFIG_PATH)
+    opens = [x for x in selected if re.search(
+        r'(?:^|\s)(?:open\("' + path + r'"|openat2?\([^,\n]+,\s*"' + path + r'")\s*,', x)]
     require(opens and any(re.search(r"O_RDONLY[^\n]*\)\s*=\s*[0-9]+(?:<[^>]+>)?$", x) for x in opens),
             "actual-clamd-config-open-not-witnessed")
     require(not any(re.search(r"O_WRONLY|O_RDWR|O_TRUNC", x) for x in opens), "daemon-config-open-for-write")
