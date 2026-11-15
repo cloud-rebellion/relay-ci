@@ -62,14 +62,14 @@ def validate_report(value, profile):
     metadata = value.get("Metadata", {})
     require(metadata.get("ImageID") == profile["image"]["config_digest"], "trivy-scanned-config-mismatch")
     os = metadata.get("OS", {})
-    require(os.get("Family") == "debian" and os.get("Name") == "13" and not os.get("EOSL"),
+    require(os.get("Family") == "alpine" and os.get("Name") == "3.24.4" and not os.get("EOSL"),
             "trivy-os-or-support-mismatch")
     config = metadata.get("ImageConfig", {})
     require(config.get("architecture") == "amd64" and config.get("os") == "linux", "trivy-platform-mismatch")
     require(metadata.get("DiffIDs") == profile["observed_diff_ids"], "trivy-rootfs-mismatch")
     rows = value.get("Results")
     require(isinstance(rows, list) and rows, "trivy-empty-results")
-    require(any(x.get("Class") == "os-pkgs" and x.get("Type") == "debian" and x.get("Packages") for x in rows),
+    require(any(x.get("Class") == "os-pkgs" and x.get("Type") == "alpine" and x.get("Packages") for x in rows),
             "trivy-os-package-inventory-missing")
     findings = []
     packages = 0

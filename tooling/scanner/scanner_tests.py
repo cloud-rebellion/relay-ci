@@ -32,9 +32,9 @@ def metadata():
 
 def report():
     return {"SchemaVersion": 2, "ArtifactType": "container_image", "Trivy": {"Version": "0.74.0"},
-            "Metadata": {"ImageID": CONFIG, "OS": {"Family": "debian", "Name": "13"},
+            "Metadata": {"ImageID": CONFIG, "OS": {"Family": "alpine", "Name": "3.24.4"},
                          "ImageConfig": {"os": "linux", "architecture": "amd64"}, "DiffIDs": [DIGEST]},
-            "Results": [{"Target": "synthetic", "Class": "os-pkgs", "Type": "debian",
+            "Results": [{"Target": "synthetic", "Class": "os-pkgs", "Type": "alpine",
                          "Packages": [{"Name": "synthetic", "Version": "1"}]}]}
 
 
@@ -249,6 +249,31 @@ class ScannerControls(unittest.TestCase):
                        {"Metadata": {**report()["Metadata"], "OS": {"Family": "alpine", "Name": "3.24"}}}):
             with self.subTest(change=change), self.assertRaises(registry.Refusal):
                 artifact.validate_report({**report(), **change}, scan_profile())
+
+    def test_alpine_os_family_release_support_and_package_type_are_exact(self):
+        self.assertEqual(artifact.validate_report(report(), scan_profile())["verdict"], "passed")
+        for os_value in ({"Family": "debian", "Name": "13.7"},
+                         {"Family": "alpine", "Name": "3.24"},
+                         {"Family": "alpine", "Name": "3.24.3"},
+                         {"Family": "alpine", "Name": "3.24.5"},
+                         {"Family": "alpine", "Name": "3.25.0"},
+                         {"Family": "alpine", "Name": "3.24.4", "EOSL": True}):
+            value = report(); value["Metadata"]["OS"] = os_value
+            with self.subTest(os=os_value), self.assertRaisesRegex(registry.Refusal, "os-or-support-mismatch"):
+                artifact.validate_report(value, scan_profile())
+        value = report(); value["Results"][0]["Type"] = "debian"
+        with self.assertRaisesRegex(registry.Refusal, "package-inventory-missing"):
+            artifact.validate_report(value, scan_profile())
+
+    def test_rejected_debian_profile_is_exact_historical_and_cannot_be_active(self):
+        import hashlib
+        path = Path(__file__).resolve().parents[2] / "profiles/historical/scanner-artifact-debian-2d901d81-rejected.json"
+        raw = path.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), "8aabce18e32b4a83687276fecef75779027163d6a4e4f84c440404f2a68cde27")
+        with self.assertRaisesRegex(registry.Refusal, "profile-subject-or-policy"):
+            profile.load(path)
+        self.assertEqual(profile.IMAGE["manifest_digest"],
+                         "sha256:b2c2f5c9a557dc1c1249e09448a84c59c3e414bb3bbbac0a9d065236c779842c")
 
     def test_unfixed_high_and_critical_both_block(self):
         value = report()
@@ -580,7 +605,7 @@ def cleanup_fixture():
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(ScannerControls)
     # This closed inventory deliberately changes only with reviewed source.
-    if suite.countTestCases() != 40:
+    if suite.countTestCases() != 42:
         raise SystemExit("Closed scanner control inventory changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     destination = os.environ.get("RELAY_SCANNER_RESULTS_DIR")
@@ -588,7 +613,7 @@ def main():
         (Path(destination) / "scanner-controls-summary.json").write_text(json.dumps({"schema": 1,
             "tests": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
             "skips": len(result.skipped), "status": "passed" if result.wasSuccessful() and not result.skipped else "failed"}) + "\n")
-    if result.skipped or result.testsRun != 40 or not result.wasSuccessful():
+    if result.skipped or result.testsRun != 42 or not result.wasSuccessful():
         raise SystemExit(1)
 
 

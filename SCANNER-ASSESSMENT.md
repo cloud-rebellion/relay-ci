@@ -5,8 +5,22 @@ separate public `cloud-rebellion/relay-ci` workflow on the exact
 `scanner/assessment-20261114` push branch. It has no private source key, app
 checkout, Stage credentials, OVH access, provider calls or activation step.
 
-The first executable milestone assesses the exact November 9 Debian build 69
-ClamAV manifest `2d901d81…`, its config `65c666ef…` and all six compressed layers.
+The active candidate is the exact November 9 Alpine build 68 ClamAV 1.5.4
+manifest `b2c2f5c9…`, config `f8ffef1c…`, index `64ca9166…`, and all six
+compressed layers totaling 43,306,985 bytes. A fresh bounded metadata-only
+observation read these exact descriptors and linked SPDX/SLSA statements.
+The SPDX contains alpine-release 3.24.4-r0, from which the expected Trivy OS
+name 3.24.4 is an explicit inference pending the actual scan. The validator
+requires exactly Alpine 3.24.4 and its OS package inventory, with no generic
+OS/future-release acceptance. This is a new candidate, not a prior pass.
+
+The predecessor Debian build 69 manifest `2d901d81…` is REJECTED: actual run
+43651048273 emitted a raw report with 126 HIGH and 1 CRITICAL package findings,
+OS Debian 13.7, and stopped at the unchanged severity-fallback WARN refusal.
+No formal completed gate pass or daemon acceptance is claimed. Its exact
+previous active JSON is preserved at
+`profiles/historical/scanner-artifact-debian-2d901d81-rejected.json`; the active
+loader refuses that historical subject. Prior source and journals are retained.
 Anonymous registry authorization remains in memory. OCI descriptor hashes and
 sizes, platform/config/layer closure, linked in-toto statement subjects and
 predicate types are checked. The image is materialized as a one-image OCI
@@ -55,7 +69,8 @@ userinfo values are never retained. The existing exact host gate and
 instrumentation does not add a CDN or infer the failed runner's hostname from
 the later Mac probe, which observed an already allowed CloudFront host.
 
-The 40 closed synthetic controls cover digest/size/redirect/subject/trust and
+The 42 closed synthetic controls (all previous 40 plus exact Alpine OS/refusal
+and inactive historical-profile controls) cover digest/size/redirect/subject/trust and
 DB/report refusals, unfixed vulnerabilities, early stop, source/event/storage
 ownership and separate result semantics. They perform no Docker/network call.
 The subject parser accepts at most 32 uniquely named bounded subjects, with

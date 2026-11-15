@@ -6,10 +6,10 @@ from registry import document, require
 from artifact import TOOL_REFERENCE, TOOL_VERSION
 
 IMAGE = {"repository": "clamav/clamav", "platform": "linux/amd64",
-    "index_digest": "sha256:0f9bbc0c50dfcbaf54f6df9d4a1cc4671afb4d73555c8b84ce46a113829d1744",
-    "manifest_digest": "sha256:2d901d81cbd1ed6556edfde8e20391bf81a13365d8f3ad9460d1c0340470ad89",
-    "config_digest": "sha256:65c666efc694c8175057dc943f1b1bdc8efc7fbb9dacbfdda5163f4015af054f",
-    "layer_count": 6, "compressed_layer_bytes": 79736974}
+    "index_digest": "sha256:64ca916618842ba469ef38a501e6c2f42a68281c064c03749b0126c0fb085ce5",
+    "manifest_digest": "sha256:b2c2f5c9a557dc1c1249e09448a84c59c3e414bb3bbbac0a9d065236c779842c",
+    "config_digest": "sha256:f8ffef1c9fad7bf457d91ea84eee10883b86f810e8768bc5adc863ed4d188f6d",
+    "layer_count": 6, "compressed_layer_bytes": 43306985}
 POLICY = {"severity": ["HIGH", "CRITICAL"], "accepted_findings": 0,
           "ignore_unfixed": False, "ignore_ids": [], "ignore_files": [], "skip_files": [],
           "vulnerability_db_maximum_age_seconds": 86400, "java_db_maximum_age_seconds": 604800}
