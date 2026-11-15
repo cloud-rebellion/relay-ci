@@ -214,6 +214,7 @@ class Trivy:
                     "database_files": before, "sbom_generated": False}
         args = scan_arguments()
         args[args.index("json")] = "cyclonedx"
+        args.remove("--list-all-pkgs")  # JSON-only; CycloneDX includes inventory.
         sbom = self.invoke(args)
         parsed = document(sbom)
         require(parsed.get("bomFormat") == "CycloneDX" and parsed.get("components"), "trivy-sbom-missing")

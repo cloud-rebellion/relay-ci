@@ -117,3 +117,9 @@ and [`pkg/flag/vulnerability_flags.go`](https://github.com/aquasecurity/trivy/bl
 
 Official tool release: https://github.com/aquasecurity/trivy/releases/tag/v0.76.2
 Alpine support table: https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/detector/ospkg/alpine/alpine.go
+
+CycloneDX invocation omits the JSON-only `--list-all-pkgs` flag; Trivy0.76.2
+automatically includes its packages in CycloneDX. The vulnerability JSON scan
+retains `--list-all-pkgs` and the full severity/package/unfixed policy. The
+strict warning refusal and nonempty SBOM component check remain active.
+Primary flag behavior: https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/flag/report_flags.go
