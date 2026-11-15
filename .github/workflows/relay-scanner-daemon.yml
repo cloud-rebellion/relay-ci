@@ -24,7 +24,7 @@ jobs:
           result="$RUNNER_TEMP/relay-scanner-phase1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir "$result"
           echo "RELAY_SCANNER_PHASE1_RESULTS_DIR=$result" >> "$GITHUB_ENV"
-      - name: Existing42 controls and new36 daemon controls without Docker or network
+      - name: Existing42 controls and new41 daemon controls without Docker or network
         shell: bash
         run: |
           RELAY_SCANNER_RESULTS_DIR="$RELAY_SCANNER_PHASE1_RESULTS_DIR" python3 -B tooling/scanner/scanner_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stderr"

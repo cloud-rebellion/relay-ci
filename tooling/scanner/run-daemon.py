@@ -26,7 +26,7 @@ from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
 from freshclam_check import check_inherited
 
 KIND = "relay-public-scanner-daemon-subset-v1"
-CONTROL_COUNT = 36
+CONTROL_COUNT = 41
 
 
 def record(root, name, value):

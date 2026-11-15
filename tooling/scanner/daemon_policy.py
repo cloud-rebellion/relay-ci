@@ -69,9 +69,43 @@ def config_witness(raw, parsed):
             "identical_duplicates": any(len(v) > 1 for v in occurrences.values())}
 
 
+def complete_trace_pairs(lines, pid):
+    """Join only the actual PID's exact syscall pair; ambiguous evidence refuses."""
+    relevant = {"execve", "open", "openat", "openat2"}
+    pending = None
+    completed = []
+    for line in lines:
+        record = re.fullmatch(r"([0-9]+)(\s+)(.*)", line)
+        if record is None or int(record[1]) != pid:
+            completed.append(line)
+            continue
+        prefix, body = record[1] + record[2], record[3]
+        resume = re.fullmatch(r"<\.\.\. ([a-z_][a-z0-9_]*) resumed>(.*)", body)
+        if resume is not None and (resume[1] in relevant or pending is not None):
+            require(pending is not None, "trace-pair-orphan-resume")
+            name, fragment = pending
+            require(resume[1] == name, "trace-pair-syscall-mismatch")
+            require(resume[2] and "<unfinished" not in resume[2] and "<... " not in resume[2],
+                    "trace-pair-resume-shape")
+            completed.append(prefix + fragment + resume[2])
+            pending = None
+            continue
+        call = re.match(r"(execve|openat2|openat|open)\(", body)
+        if call is not None:
+            require(pending is None, "trace-pair-pending-overwritten-or-interleaved")
+            if "<unfinished" in body:
+                require(body.endswith("<unfinished ...>") and body.count("<unfinished") == 1,
+                        "trace-pair-unfinished-shape")
+                pending = (call[1], body[:-len("<unfinished ...>")].rstrip())
+                continue
+        completed.append(line)
+    require(pending is None, "trace-pair-unmatched-unfinished")
+    return completed
+
+
 def trace_witness(raw, pid):
     require(type(pid) is int and pid > 1 and 0 < len(raw) <= 8 << 20, "trace-witness-bound")
-    lines = raw.decode("utf-8", "strict").splitlines()
+    lines = complete_trace_pairs(raw.decode("utf-8", "strict").splitlines(), pid)
     selected = [x for x in lines if re.match(r"^" + str(pid) + r"\s", x)]
     require(any(re.search(r'execve\("[^"\n]*/clamd",.*\)\s*=\s*0$', x) for x in selected),
             "actual-clamd-exec-not-witnessed")

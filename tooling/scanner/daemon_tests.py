@@ -129,6 +129,86 @@ class DaemonControls(unittest.TestCase):
                 with self.subTest(syscall=syscall,flags=flags),self.assertRaisesRegex(Refusal,"for-write"):
                     policy.trace_witness(raw+write,123)
 
+    def test_paired_actual_exec_uses_same_pid_success_and_preserves_raw_hash(self):
+        import hashlib
+        complete = trace().decode()
+        first, opening = complete.splitlines()
+        fragment, suffix = first.rsplit(") = 0", 1)
+        self.assertEqual(suffix, "")
+        body = (fragment + " <unfinished ...>\n123 <... execve resumed>) = 0\n" + opening + "\n").encode()
+        proof = policy.trace_witness(body, 123)
+        self.assertEqual(proof["trace_sha256"], hashlib.sha256(body).hexdigest())
+        self.assertEqual(proof["actual_clamd_host_pid"], 123)
+        self.assertTrue(proof["successful_read_open"])
+
+    def test_paired_actual_config_opens_keep_all_three_kernel_forms_and_fd_zero(self):
+        for syscall in ("open", "openat", "openat2"):
+            for fd in (0, 4, 127):
+                first, opening = trace(syscall=syscall).decode().splitlines()
+                fragment = opening.rsplit(") = 4", 1)[0]
+                body = (first + "\n" + fragment + " <unfinished ...>\n123 <... " + syscall +
+                        " resumed>) = " + str(fd) + "\n").encode()
+                with self.subTest(syscall=syscall, fd=fd):
+                    proof = policy.trace_witness(body, 123)
+                    self.assertTrue(proof["successful_read_open"])
+                    self.assertEqual(proof["actual_opened_config"], policy.CONFIG_PATH)
+
+    def test_paired_records_allow_foreign_pid_interleave_without_borrowing_it(self):
+        first, opening = trace().decode().splitlines()
+        fragment = first.rsplit(") = 0", 1)[0]
+        body = (fragment + " <unfinished ...>\n" + trace(124).decode() +
+                "123 --- SIGCONT {si_signo=SIGCONT, si_code=SI_USER} ---\n" +
+                "123 <... execve resumed>) = 0\n" + opening + "\n").encode()
+        self.assertTrue(policy.trace_witness(body, 123)["successful_read_open"])
+        foreign_suffix = body.replace(b"123 <... execve resumed>", b"124 <... execve resumed>")
+        with self.assertRaisesRegex(Refusal, "trace-pair-unmatched"):
+            policy.trace_witness(foreign_suffix, 123)
+
+    def test_orphan_mismatched_duplicate_overwritten_and_unmatched_pairs_refuse(self):
+        complete = trace()
+        start = b'123 execve("/usr/local/sbin/clamd", ["clamd"], 0x1 <unfinished ...>\n'
+        resume = b'123 <... execve resumed>) = 0\n'
+        malformed = {
+            "orphan": resume,
+            "mismatched": start + b'123 <... openat resumed>) = 0\n',
+            "duplicate-resume": start + resume + resume,
+            "overwritten": start + start + resume,
+            "complete-call-while-pending": start + complete + resume,
+            "unmatched": start,
+            "wrong-pid": start + b'124 <... execve resumed>) = 0\n',
+            "malformed-unfinished": start.replace(b"<unfinished ...>", b"<unfinished ...> extra"),
+            "nested-resume": start + b'123 <... execve resumed><... execve resumed>) = 0\n',
+        }
+        for name, body in malformed.items():
+            # An otherwise valid complete witness cannot hide malformed relevant pairs.
+            with self.subTest(name=name), self.assertRaisesRegex(Refusal, "trace-pair-"):
+                policy.trace_witness(complete + body, 123)
+
+    def test_paired_failed_exec_and_config_pid_path_flags_or_fd_never_clear_witness(self):
+        exec_start = b'123 execve("/usr/local/sbin/clamd", ["clamd"], 0x1 <unfinished ...>\n'
+        exec_resume = b'123 <... execve resumed>) = 0\n'
+        opening = trace().splitlines()[1] + b"\n"
+        failed_exec = [exec_start + exec_resume.replace(b"= 0", b"= -1 EACCES (Permission denied)") + opening,
+                       exec_start.replace(b"/usr/local/sbin/clamd", b"/usr/bin/other") + exec_resume + opening]
+        for body in failed_exec:
+            with self.subTest(body=body), self.assertRaisesRegex(Refusal, "exec-not-witnessed"):
+                policy.trace_witness(body, 123)
+        for syscall in ("open", "openat", "openat2"):
+            first, full = trace(syscall=syscall).splitlines()
+            fragment = full.rsplit(b") = 4", 1)[0]
+            body = first + b"\n" + fragment + b" <unfinished ...>\n123 <... " + syscall.encode() + b" resumed>) = 4\n"
+            for variant in (body.replace(b"= 4", b"= -1 ENOENT (No such file)"),
+                            body.replace(b"= 4", b"= ?"), body.replace(b"= 4", b"= 4garbage"),
+                            body.replace(b"/etc/clamav/clamd.conf", b"/tmp/other.conf"),
+                            body.replace(b"O_RDONLY", b"O_CLOEXEC"),
+                            body.replace(b"123 <... ", b"124 <... ")):
+                with self.subTest(syscall=syscall, body=variant), self.assertRaises(Refusal):
+                    policy.trace_witness(variant, 123)
+            for flags in (b"O_RDWR", b"O_WRONLY", b"O_RDONLY|O_TRUNC"):
+                # Keep a successful clean read too; a paired write still poisons the witness.
+                with self.subTest(syscall=syscall, flags=flags), self.assertRaisesRegex(Refusal, "for-write"):
+                    policy.trace_witness(trace(syscall=syscall) + body.replace(b"O_RDONLY", flags), 123)
+
     def test_fresh_loaded_signature_date(self):
         self.assertEqual(policy.fresh_version(b"ClamAV 1.5.4/28258/Sun Nov 15 14:00:00 2026\x00", NOW)["age_seconds"], 3600)
 
@@ -600,7 +680,7 @@ class DaemonControls(unittest.TestCase):
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(DaemonControls)
     count = suite.countTestCases()
-    if count != 36:
+    if count != 41:
         raise RuntimeError("Closed daemon controls changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     value = {"schema": 1, "tests": result.testsRun, "failures": len(result.failures),
