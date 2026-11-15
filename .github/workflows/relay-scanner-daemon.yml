@@ -24,13 +24,14 @@ jobs:
           result="$RUNNER_TEMP/relay-scanner-phase1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir "$result"
           echo "RELAY_SCANNER_PHASE1_RESULTS_DIR=$result" >> "$GITHUB_ENV"
-      - name: Existing91 controls and new3 ZIP diagnostic controls without Docker or network
+      - name: Existing94 controls and new3 ordinary ZIP32 quota diagnostic controls without Docker or network
         shell: bash
         run: |
           RELAY_SCANNER_RESULTS_DIR="$RELAY_SCANNER_PHASE1_RESULTS_DIR" python3 -B tooling/scanner/scanner_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/scanner-controls.stderr"
           python3 -B tooling/scanner/daemon_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/daemon-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/daemon-controls.stderr"
           python3 -B tooling/scanner/direct_fixture_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/direct-fixtures-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/direct-fixtures-controls.stderr"
           python3 -B tooling/scanner/zip_diagnostic_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/zip-diagnostics-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/zip-diagnostics-controls.stderr"
+          python3 -B tooling/scanner/zip32_quota_diagnostic_tests.py > "$RELAY_SCANNER_PHASE1_RESULTS_DIR/zip32-quota-diagnostics-controls.stdout" 2> "$RELAY_SCANNER_PHASE1_RESULTS_DIR/zip32-quota-diagnostics-controls.stderr"
       - name: Strict artifact scan then inherited daemon subset in owned bounded backend
         run: python3 -B tooling/scanner/run-daemon.py --execute
       - name: Encrypt raw diagnostics and keep full acceptance false
