@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import struct
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import unittest
 from unittest import mock
 
 import daemon_policy as policy
+import storage
 from daemon_runtime import PrivateEgress, Candidate, OwnedTrace, owned_inventory, rule_identity
 from registry import Refusal
 
@@ -351,11 +353,151 @@ class DaemonControls(unittest.TestCase):
             self.assertFalse((root / "initial-load-witness.json").exists())
             candidate.execute.assert_not_called(); candidate.exchange.assert_not_called()
 
+    def runtime_fixture(self, root, selector=None):
+        environment = {"GITHUB_ACTIONS":"true", "RUNNER_ENVIRONMENT":"github-hosted", "RUNNER_OS":"Linux",
+            "RUNNER_ARCH":"X64", "GITHUB_REPOSITORY":"cloud-rebellion/relay-ci", "GITHUB_REPOSITORY_ID":"1457664829",
+            "GITHUB_EVENT_NAME":"push", "GITHUB_REF":"refs/heads/scanner/assessment-20261114", "RUNNER_TEMP":str(root)}
+        with mock.patch.dict(os.environ, environment, clear=True):
+            daemon = storage.BoundedDaemon(root / "results", **({"private_containerd":selector} if selector is not None else {}))
+        daemon.results.mkdir(mode=0o700, exist_ok=True)
+        daemon.root.mkdir(mode=0o700); daemon.mount.mkdir(mode=0o700)
+        return daemon
+
+    def test_loaded_service_and_unloaded_generic_unit_are_distinct_no_fake_pid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            owned, active = self.trace_fixture(Path(temporary))
+            encoded = lambda value: ("\n".join(key+"="+item for key,item in value.items())+"\n").encode()
+            self.assertEqual(storage.unit_state(encoded(active)), active)
+            unloaded = b"LoadState=not-found\nActiveState=inactive\n"
+            parsed = storage.unit_state(unloaded, allow_unloaded=True)
+            self.assertNotIn("MainPID", parsed); self.assertNotIn("ControlPID", parsed)
+            variants = [unloaded, encoded({k:v for k,v in active.items() if k!="InvocationID"}),
+                encoded(active)+b"MainPID=222\n", encoded(active)+b"Foreign=value\n"]
+            for raw in variants:
+                with self.subTest(raw=raw), self.assertRaises(Refusal): storage.unit_state(raw)
+            for raw in (b"LoadState=not-found\nActiveState=active\n", unloaded+b"MainPID=222\n",
+                        unloaded+b"MainPID=\n", unloaded+b"ExecStart=strace foreign\n", unloaded+b"Foreign=value\n",
+                        encoded({k:v for k,v in active.items() if k!="MainPID"})):
+                with self.subTest(raw=raw), self.assertRaises(Refusal): storage.unit_state(raw, allow_unloaded=True)
+            owned.d.command.return_value = SimpleNamespace(returncode=0,stdout=unloaded)
+            self.assertEqual(owned._raw_state(allow_unloaded=True), parsed)
+            with self.assertRaises(Refusal): owned._raw_state()
+            shape=json.loads((Path(temporary)/"owned-trace-state-shape-2.json").read_bytes())
+            self.assertIn("MainPID",shape["missing"])
+            # A failure after stop preserves the attempted boundary and original witness.
+            owned._raw_state=mock.Mock(side_effect=[active,Refusal("synthetic-after-stop-shape")])
+            owned._settle_call = None
+            owned.__exit__(Refusal,Refusal("actual-clamd-exec-not-witnessed"),None)
+            receipt=json.loads((Path(temporary)/"owned-trace-cleanup.json").read_bytes())
+            self.assertTrue(receipt["stop_attempted"])
+            self.assertEqual(receipt["cleanup_phase"],"read-after-stop")
+            self.assertEqual(receipt["prior_identity"]["MainPID"],"222")
+            self.assertEqual(receipt["primary_error"],"actual-clamd-exec-not-witnessed")
+
+    def test_private_containerd_is_opt_in_hard_bounded_and_has_no_shared_listeners(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            default=self.runtime_fixture(root)
+            self.assertFalse(default.private_containerd)
+            default.command=mock.Mock()
+            with self.assertRaises(Refusal): default.start_private_runtime()
+            default.command.assert_not_called()
+            daemon=self.runtime_fixture(root,True)
+            def command(args,**kwargs):
+                self.assertTrue(daemon.runtime_started)
+                return SimpleNamespace(returncode=0,stdout=b"")
+            daemon.command=mock.Mock(side_effect=command)
+            daemon.verify_runtime_unit=mock.Mock(return_value=224)
+            with mock.patch.object(Path,"exists",return_value=True), mock.patch.object(Path,"lstat",return_value=SimpleNamespace(st_mode=stat.S_IFSOCK)):
+                daemon.start_private_runtime()
+            args=daemon.command.call_args.args[0]
+            self.assertIn("--unit="+daemon.runtime_unit,args)
+            for item in ("--property=MemoryMax=256M","--property=CPUQuota=100%","--property=TasksMax=128",
+                         "--property=RuntimeMaxSec=7200","--property=KillMode=control-group",
+                         "--address="+str(daemon.runtime_socket),"--root="+str(daemon.runtime_root),"--state="+str(daemon.runtime_state)):
+                self.assertIn(item,args)
+            self.assertNotIn("/run/containerd/containerd.sock"," ".join(args))
+            self.assertTrue(daemon.runtime_root.is_relative_to(daemon.mount)); self.assertTrue(daemon.runtime_state.is_relative_to(daemon.mount))
+            text=daemon.runtime_config.read_text()
+            for plugin in ("io.containerd.grpc.v1.cri","io.containerd.cri.v1.images","io.containerd.cri.v1.runtime","io.containerd.nri.v1.nri"):
+                self.assertIn('"'+plugin+'"',text)
+            self.assertIn('[debug]\naddress = ""',text); self.assertIn('[metrics]\naddress = ""',text)
+            self.assertNotIn("/run/containerd",text)
+            with self.assertRaisesRegex(Refusal,"start-once"): daemon.start_private_runtime()
+            self.assertEqual(daemon.command.call_count,1)
+            with self.assertRaisesRegex(Refusal,"selector"): self.runtime_fixture(root,"true")
+
+    def test_tracer_attaches_both_verified_owned_service_trees_with_combined_caps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            owned,_=self.trace_fixture(Path(temporary)); daemon=owned.d
+            daemon.private_containerd=True; daemon.runtime_unit=daemon.unit+"-containerd"
+            daemon.verify_unit=mock.Mock(return_value=10); daemon.verify_runtime_unit=mock.Mock(return_value=20)
+            started=[]
+            def command(args,**kwargs):
+                if "systemd-run" in args:
+                    self.assertGreater(daemon.verify_runtime_unit.call_count,0)
+                    self.assertEqual([args[i+1] for i,x in enumerate(args) if x=="-p"],["10","20"])
+                    started.append(True)
+                return SimpleNamespace(returncode=0,stdout=b"")
+            daemon.command=mock.Mock(side_effect=command)
+            def probe(mode,group):
+                self.assertEqual(mode,"tree")
+                pid=20 if group.endswith("-containerd.service") else 10
+                return {"cgroup":group,"directories":[group],"processes":[{"pid":pid,"status":"present","start_ticks":"111",
+                    "cgroup":group,"threads":[{"tid":pid,"tracer_pid":222 if started else 0}]}]}
+            owned.probe=mock.Mock(side_effect=probe); owned.state=mock.Mock(return_value={"MainPID":"222"})
+            self.assertIs(owned.__enter__(),owned)
+            self.assertEqual(len(started),1)
+            inventory=json.loads((Path(temporary)/"owned-trace-initial-inventory.json").read_bytes())
+            self.assertEqual(len(inventory["services"]),2)
+            # Each tree can be valid alone while their union exceeds the global cap.
+            def large(mode,group):
+                values=probe(mode,group); base=20 if group.endswith("-containerd.service") else 10
+                values["processes"][0]["threads"]=[{"tid":base*1000+i,"tracer_pid":222} for i in range(300)]
+                return values
+            owned.probe.side_effect=large
+            with self.assertRaisesRegex(Refusal,"combined-bound"): owned.inventory(10)
+
+    def test_private_runtime_identity_and_stop_are_exact_and_never_repeat(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daemon=self.runtime_fixture(Path(temporary),True); daemon.runtime_started=True
+            active={"LoadState":"loaded","ActiveState":"active","MainPID":"224","ControlPID":"0",
+                "ControlGroup":"/system.slice/"+daemon.runtime_unit+".service","InvocationID":"b"*32,
+                "ExecStart":"containerd --address="+str(daemon.runtime_socket)+" --root="+str(daemon.runtime_root)+
+                    " --state="+str(daemon.runtime_state)+" --config="+str(daemon.runtime_config)}
+            encoded=lambda value:("\n".join(key+"="+item for key,item in value.items())+"\n").encode()
+            daemon.runtime_process=mock.Mock(return_value={"pid":224,"status":"present","start_ticks":"111"})
+            daemon.command=mock.Mock(return_value=SimpleNamespace(returncode=0,stdout=encoded(active)))
+            self.assertEqual(daemon.verify_runtime_unit(),224)
+            for field,value in (("ExecStart",active["ExecStart"].replace(str(daemon.runtime_socket),"/run/containerd/containerd.sock")),
+                                ("ControlGroup","/system.slice/containerd.service"),("InvocationID","c"*32)):
+                daemon.command.return_value.stdout=encoded({**active,field:value})
+                with self.subTest(field=field),self.assertRaises(Refusal):daemon.stop_private_runtime()
+                self.assertFalse(daemon.runtime_stop_attempted)
+                self.assertFalse(any("stop" in call.args[0] for call in daemon.command.call_args_list))
+            calls=[]
+            def command(args,**kwargs):
+                calls.append(args)
+                if "show" in args:
+                    body=encoded(active) if not daemon.runtime_stop_attempted else b"LoadState=not-found\nActiveState=inactive\n"
+                else:body=b""
+                return SimpleNamespace(returncode=0,stdout=body)
+            daemon.command=mock.Mock(side_effect=command)
+            daemon.runtime_process.side_effect=[{"pid":224,"status":"present","start_ticks":"111"},{"pid":224,"status":"absent"}]
+            daemon.stop_private_runtime()
+            self.assertFalse(daemon.runtime_started)
+            self.assertEqual(sum("stop" in args for args in calls),1)
+            receipt=json.loads((daemon.results/"owned-containerd-cleanup.json").read_bytes())
+            self.assertTrue(receipt["settled"]);self.assertTrue(receipt["unloaded_service_pid_fields_inapplicable"])
+            self.assertNotIn("MainPID",receipt["state_readback"])
+            with self.assertRaises(Refusal):daemon.stop_private_runtime()
+            self.assertEqual(sum("stop" in args for args in calls),1)
+
 
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(DaemonControls)
     count = suite.countTestCases()
-    if count != 30:
+    if count != 34:
         raise RuntimeError("Closed daemon controls changed")
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     value = {"schema": 1, "tests": result.testsRun, "failures": len(result.failures),

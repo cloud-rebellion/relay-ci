@@ -42,13 +42,47 @@ def owned_loop(rows, expected_device, expected_file):
             "loop-ownership-mismatch")
 
 
+UNIT_PROPERTIES = "LoadState,ActiveState,MainPID,ControlPID,ExecStart,ControlGroup,InvocationID"
+RUNTIME_PID_PROBE = """import json,pathlib,sys
+pid=int(sys.argv[1]); assert pid>1
+try:
+ raw=(pathlib.Path('/proc')/str(pid)/'stat').read_text()
+ assert raw.split('(',1)[0].strip()==str(pid)
+ start=raw.rsplit(')',1)[1].split()[19]; assert start.isdecimal()
+ value={'status':'present','pid':pid,'start_ticks':start}
+except FileNotFoundError:
+ value={'status':'absent','pid':pid}
+print(json.dumps(value))
+"""
+
+
+def unit_state(raw, *, allow_unloaded=False):
+    require(isinstance(raw, bytes) and len(raw) <= 64 << 10, "owned-unit-state-bound")
+    lines = raw.decode("utf-8", "strict").splitlines()
+    require(all(not line.strip() or "=" in line for line in lines), "owned-unit-state-line")
+    pairs = [line.split("=", 1) for line in lines if "=" in line]
+    keys = [row[0] for row in pairs]
+    require(len(keys) == len(set(keys)) and set(keys) <= set(UNIT_PROPERTIES.split(",")), "owned-unit-state-shape")
+    value = dict(pairs)
+    # Once a transient service is unloaded, systemd's generic Unit object has
+    # no service PID/ExecStart properties. Do not fabricate zero-PID readbacks.
+    if allow_unloaded and value.get("LoadState") == "not-found":
+        require(value.get("ActiveState") == "inactive" and value.get("MainPID") in (None, "0")
+                and value.get("ControlPID") in (None, "0")
+                and all(value.get(key) in (None, "") for key in ("ExecStart", "ControlGroup", "InvocationID")),
+                "owned-unit-absent-state-ambiguous")
+    else:
+        require(set(keys) == set(UNIT_PROPERTIES.split(",")), "owned-unit-state-shape")
+    return value
+
+
 class BoundedDaemon(AbstractContextManager):
     """8 GiB *allocated* ext4 image contains all OCI, DB and daemon storage.
 
     The filesystem is the hard capacity boundary. All commands and stderr are
     retained privately by the caller; polling is readiness, never quota.
     """
-    def __init__(self, results, *, run=subprocess.run):
+    def __init__(self, results, *, run=subprocess.run, private_containerd=False):
         public_runner(os.environ)
         self.run = run
         self.results = Path(results).resolve()
@@ -67,6 +101,16 @@ class BoundedDaemon(AbstractContextManager):
         self.unit_started = False
         self.daemon_id = None
         self.commands = 0
+        require(type(private_containerd) is bool, "private-runtime-selector")
+        self.private_containerd = private_containerd
+        self.runtime_unit = self.unit + "-containerd"
+        self.runtime_socket = self.root / "containerd.sock"
+        self.runtime_root = self.mount / "containerd"
+        self.runtime_state = self.mount / "containerd-state"
+        self.runtime_config = self.root / "containerd.toml"
+        self.runtime_started = False
+        self.runtime_stop_attempted = False
+        self.runtime_identity = None
 
     def command(self, args, *, allow_failure=False, timeout=60, docker=False, allocation=False):
         self.commands += 1
@@ -157,7 +201,86 @@ class BoundedDaemon(AbstractContextManager):
                 str(self.root / "docker.sock") in fields.get("ExecStart", "") and
                 str(self.mount / "docker") in fields.get("ExecStart", "") and
                 fields.get("ControlGroup", "").endswith("/" + self.unit + ".service"), "owned-daemon-unit-identity")
+        if self.private_containerd:
+            require("--containerd=" + str(self.runtime_socket) in fields["ExecStart"], "owned-daemon-private-runtime-binding")
         return int(fields["MainPID"])
+
+    def runtime_process(self, pid):
+        raw = self.command(["sudo", "-n", "python3", "-c", RUNTIME_PID_PROBE, str(pid)]).stdout
+        require(len(raw) <= 4096, "private-runtime-process-bound")
+        value = json.loads(raw)
+        require(value.get("pid") == pid, "private-runtime-process-pid")
+        return value
+
+    def verify_runtime_unit(self):
+        require(self.private_containerd and self.runtime_started, "private-runtime-not-started")
+        result = self.command(["sudo", "-n", "systemctl", "show", "--all", self.runtime_unit,
+                               "--property=" + UNIT_PROPERTIES])
+        value = unit_state(result.stdout)
+        execution = value["ExecStart"]
+        require(value["LoadState"] == "loaded" and value["ActiveState"] == "active"
+                and value["MainPID"].isdecimal() and int(value["MainPID"]) > 1 and value["ControlPID"] == "0"
+                and value["ControlGroup"] == "/system.slice/" + self.runtime_unit + ".service"
+                and re.fullmatch(r"[0-9a-f]{32}", value["InvocationID"]) and "containerd" in execution
+                and all(flag + str(path) in execution for flag,path in (("--address=",self.runtime_socket),
+                    ("--root=",self.runtime_root),("--state=",self.runtime_state),("--config=",self.runtime_config)))
+                and "/run/containerd/containerd.sock" not in execution, "private-runtime-unit-identity")
+        process = self.runtime_process(int(value["MainPID"]))
+        require(process.get("status") == "present" and isinstance(process.get("start_ticks"),str)
+                and process["start_ticks"].isdecimal(), "private-runtime-process-start")
+        identity = {key:value[key] for key in ("MainPID","ControlGroup","ExecStart","InvocationID")}
+        identity["start_ticks"] = process["start_ticks"]
+        if self.runtime_identity is None: self.runtime_identity = identity
+        require(identity == self.runtime_identity, "private-runtime-generation-changed")
+        return int(value["MainPID"])
+
+    def start_private_runtime(self):
+        require(self.private_containerd and not self.runtime_started, "private-runtime-start-once")
+        self.runtime_root.mkdir(mode=0o700); self.runtime_state.mkdir(mode=0o700)
+        # This daemon has no CRI, NRI, debug or metrics listener. Persistent
+        # image/state bytes remain inside the already allocated8GiB filesystem.
+        self.runtime_config.write_text('version = 2\ndisabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", "io.containerd.cri.v1.runtime", "io.containerd.nri.v1.nri"]\n'
+            + '[grpc]\naddress = ' + json.dumps(str(self.runtime_socket)) + '\n'
+            + '[ttrpc]\naddress = ' + json.dumps(str(self.root / "containerd-ttrpc.sock")) + '\n'
+            + '[debug]\naddress = ""\n[metrics]\naddress = ""\n')
+        self.runtime_started = True  # ownership intent precedes an ambiguous start response
+        self.command(["sudo", "-n", "systemd-run", "--unit=" + self.runtime_unit,
+            "--property=MemoryMax=256M", "--property=CPUQuota=100%", "--property=TasksMax=128",
+            "--property=RuntimeMaxSec=7200", "--property=KillMode=control-group", "--property=TimeoutStopSec=20",
+            "--property=StandardOutput=append:" + str(self.mount / "containerd.log"),
+            "--property=StandardError=append:" + str(self.mount / "containerd.log"),
+            "containerd", "--address=" + str(self.runtime_socket), "--root=" + str(self.runtime_root),
+            "--state=" + str(self.runtime_state), "--config=" + str(self.runtime_config)])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            self.verify_runtime_unit()
+            if self.runtime_socket.exists():
+                require(stat.S_ISSOCK(self.runtime_socket.lstat().st_mode), "private-runtime-socket-type")
+                return
+            time.sleep(0.2)
+        raise Refusal("private-runtime-readiness-timeout")
+
+    def stop_private_runtime(self):
+        pid = self.verify_runtime_unit()
+        require(not self.runtime_stop_attempted, "private-runtime-stop-no-repeat")
+        self.runtime_stop_attempted = True
+        self.command(["sudo", "-n", "systemctl", "stop", self.runtime_unit], timeout=60)
+        result = self.command(["sudo", "-n", "systemctl", "show", "--all", self.runtime_unit,
+                               "--property=" + UNIT_PROPERTIES])
+        value = unit_state(result.stdout, allow_unloaded=True)
+        absent = value.get("LoadState") == "not-found"
+        require(value.get("ActiveState") == "inactive" and (absent or (value.get("LoadState") == "loaded"
+                and value.get("MainPID") == "0" and value.get("ControlPID") == "0"
+                and all(value.get(key) in ("",self.runtime_identity[key]) for key in ("ExecStart","ControlGroup","InvocationID")))),
+                "private-runtime-not-settled")
+        process = self.runtime_process(pid)
+        require(process.get("status") == "absent" or (process.get("status") == "present"
+                and isinstance(process.get("start_ticks"),str) and process["start_ticks"].isdecimal()
+                and process["start_ticks"] != self.runtime_identity["start_ticks"]), "private-runtime-prior-process-present-or-unknown")
+        self.runtime_started = False
+        (self.results / "owned-containerd-cleanup.json").write_text(json.dumps({"settled":True,"prior_identity":self.runtime_identity,
+            "state_readback":value,"unloaded_service_pid_fields_inapplicable":absent,"prior_process":process},sort_keys=True)+"\n")
+        self.command(["sudo", "-n", "tail", "--bytes", str(1 << 20), str(self.mount / "containerd.log")])
 
     def __enter__(self):
         require(shutil.disk_usage(self.root.parent).free >= 11 * GIB, "bounded-storage-free-space")
@@ -183,6 +306,8 @@ class BoundedDaemon(AbstractContextManager):
             self.command(["sudo", "-n", "chown", str(os.getuid()) + ":" + str(os.getgid()), str(self.mount)])
             self.command(["sudo", "-n", "chmod", "0700", str(self.mount)])
             (self.root / "daemon.json").write_text("{}\n")
+            if self.private_containerd:
+                self.start_private_runtime()
             self.unit_started = True
             self.command(["sudo", "-n", "systemd-run", "--unit=" + self.unit, "--collect",
                 "--property=MemoryMax=1G", "--property=CPUQuota=200%", "--property=TasksMax=512",
@@ -194,7 +319,8 @@ class BoundedDaemon(AbstractContextManager):
                 "--pidfile=" + str(self.root / "dockerd.pid"), "--storage-driver=vfs",
                 "--config-file=" + str(self.root / "daemon.json"), "--bridge=none", "--iptables=false", "--ip-forward=false",
                 "--ip-masq=false", "--userland-proxy=false", "--containerd-namespace=" + self.unit,
-                "--containerd-plugins-namespace=" + self.unit + "-plugins"])
+                "--containerd-plugins-namespace=" + self.unit + "-plugins",
+                *(["--containerd=" + str(self.runtime_socket)] if self.private_containerd else [])])
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 socket = self.root / "docker.sock"
@@ -229,6 +355,8 @@ class BoundedDaemon(AbstractContextManager):
             self.unit_started = False
             self.daemon_id = None
             self.command(["sudo", "-n", "tail", "--bytes", str(4 << 20), str(self.mount / "dockerd.log")])
+        if self.runtime_started:
+            self.stop_private_runtime()
         if self.mounted:
             self.verify_mount()
             self.command(["sudo", "-n", "umount", str(self.mount)])

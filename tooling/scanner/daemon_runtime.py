@@ -12,6 +12,7 @@ import time
 
 from daemon_policy import CONFIG, CONFIG_PATH, DB_PATH, MEMORY, REFERENCE, SETTINGS, SUBNET
 from registry import require, Refusal
+from storage import UNIT_PROPERTIES, unit_state
 
 
 PROCESS_PROBE = r'''
@@ -270,6 +271,9 @@ class OwnedTrace(AbstractContextManager):
         self.stop_attempted = False
         self.prior = None
         self.cleanup_error = None
+        self.cleanup_phase = "not-started"
+        self.last_state = None
+        self.state_reads = 0
 
     def _record(self, value):
         raw = json.dumps(value, sort_keys=True, indent=2).encode() + b"\n"
@@ -281,15 +285,21 @@ class OwnedTrace(AbstractContextManager):
         require(result.returncode == 0 and 0 < len(result.stdout) <= 2 << 20, "owned-process-probe-bound")
         return json.loads(result.stdout)
 
-    def _raw_state(self):
-        properties = "LoadState,ActiveState,MainPID,ControlPID,ExecStart,ControlGroup,InvocationID"
+    def _raw_state(self, *, allow_unloaded=False):
         result = self.d.command(["sudo", "-n", "systemctl", "show", "--all", self.unit,
-                                 "--property=" + properties])
+                                 "--property=" + UNIT_PROPERTIES])
         require(result.returncode == 0 and len(result.stdout) <= 64 << 10, "owned-trace-state-unknown")
-        rows = [line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line]
-        require(len(rows) == len({row[0] for row in rows}) and
-                {row[0] for row in rows} == set(properties.split(",")), "owned-trace-state-shape")
-        return dict(rows)
+        self.state_reads += 1
+        pairs = [line.split("=",1) for line in result.stdout.decode().splitlines() if "=" in line]
+        keys = [row[0] for row in pairs]; expected = set(UNIT_PROPERTIES.split(","))
+        # Retain the exact failed predicate without exporting arbitrary values.
+        shape = {"allow_unloaded":allow_unloaded,"cleanup_phase":self.cleanup_phase,"pair_count":len(keys),
+                 "missing":sorted(expected-set(keys)),"duplicate_expected":[key for key in sorted(expected) if keys.count(key)>1],
+                 "unexpected_count":sum(key not in expected for key in keys)}
+        (self.d.results / ("owned-trace-state-shape-"+str(self.state_reads)+".json")).write_text(json.dumps(shape,sort_keys=True)+"\n")
+        value = unit_state(result.stdout, allow_unloaded=allow_unloaded)
+        self.last_state = value
+        return value
 
     def _active(self, value):
         require(value.get("LoadState") == "loaded" and value.get("ActiveState") == "active"
@@ -317,10 +327,19 @@ class OwnedTrace(AbstractContextManager):
         return self._active(self._raw_state())
 
     def inventory(self, main):
-        group = "/system.slice/" + self.d.unit + ".service"
-        value = self.probe("tree", group)
-        pids, threads = owned_inventory(value, group, main)
-        return value, pids, threads
+        roots = [(self.d.unit, main)]
+        if getattr(self.d, "private_containerd", False):
+            roots.append((self.d.runtime_unit, self.d.verify_runtime_unit()))
+        services, pids, threads = [], [], []
+        for unit, pid in roots:
+            group = "/system.slice/" + unit + ".service"
+            value = self.probe("tree", group)
+            selected, current = owned_inventory(value, group, pid)
+            require(not set(selected) & set(pids), "owned-trace-service-overlap")
+            services.append(value); pids.extend(selected); threads.extend(current)
+        require(0 < len(pids) <= 32 and 0 < len(threads) <= 512
+                and len({item["tid"] for item in threads}) == len(threads), "owned-trace-combined-bound")
+        return {"services":services}, sorted(pids), threads
 
     def __enter__(self):
         main = self.d.verify_unit()
@@ -357,29 +376,37 @@ class OwnedTrace(AbstractContextManager):
 
     def _settle(self):
         require(self.prior is not None, "owned-trace-no-verified-prior-identity")
-        value = self._raw_state()
+        self.cleanup_phase = "read-before-stop"
+        value = self._raw_state(allow_unloaded=True)
         stop_error = None
         if value.get("ActiveState") == "active":
             self._active(value)  # Never stop a replacement or foreign active unit.
             require(not self.stop_attempted, "owned-trace-stop-already-attempted-no-repeat")
             self.stop_attempted = True
+            self.cleanup_phase = "stop-attempted"
             try:
                 self.d.command(["sudo", "-n", "systemctl", "stop", self.unit])
             except BaseException as error:
                 stop_error = error_code(error)
-            value = self._raw_state()  # Successful readback, not stop acknowledgement, proves settlement.
-        require(value.get("LoadState") in {"loaded", "not-found"} and value.get("ActiveState") == "inactive"
-                and value.get("MainPID") == "0" and value.get("ControlPID") == "0",
-                "owned-trace-not-settled")
-        for key in ("ExecStart", "ControlGroup", "InvocationID"):
-            require(value.get(key) in {"", self.prior[key]}, "owned-trace-retired-identity-changed")
+            self.cleanup_phase = "read-after-stop"
+            value = self._raw_state(allow_unloaded=True)
+        absent = value.get("LoadState") == "not-found"
+        require(value.get("ActiveState") == "inactive" and (absent or (value.get("LoadState") == "loaded"
+                and value.get("MainPID") == "0" and value.get("ControlPID") == "0")), "owned-trace-not-settled")
+        if not absent:
+            for key in ("ExecStart", "ControlGroup", "InvocationID"):
+                require(value.get(key) in {"", self.prior[key]}, "owned-trace-retired-identity-changed")
+        self.cleanup_phase = "verify-prior-process"
         process = self.probe("settled", self.prior["MainPID"])
         absence = prior_process_settled(process, int(self.prior["MainPID"]), self.prior["start_ticks"])
         # Retain final flushed trace for diagnostics only. It never revises a failed witness verdict.
+        self.cleanup_phase = "capture-final-trace"
         final = self.d.command(["sudo", "-n", "cat", str(self.path)]).stdout
         require(0 < len(final) < 8 << 20, "owned-trace-final-exhausted-or-empty")
         (self.d.results / "actual-clamd-config-trace-poststop.stdout").write_bytes(final)
+        self.cleanup_phase = "settled"
         return {"settled": True, "state": value, "prior_identity": self.prior,
+                "unloaded_service_pid_fields_inapplicable":absent,
                 "prior_process": absence, "stop_attempted": self.stop_attempted,
                 "stop_response_error": stop_error, "final_trace_sha256": hashlib.sha256(final).hexdigest(),
                 "final_trace_bytes": len(final), "final_trace_changes_witness_verdict": False}
@@ -393,6 +420,8 @@ class OwnedTrace(AbstractContextManager):
         except BaseException as error:
             self.cleanup_error = error
             value["cleanup_error"] = error_code(error)
+        value.update(prior_identity=self.prior,stop_attempted=self.stop_attempted,
+                     cleanup_phase=self.cleanup_phase,last_successful_state=self.last_state)
         try:
             self._record(value)
         except BaseException as error:

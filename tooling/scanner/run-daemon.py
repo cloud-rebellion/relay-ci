@@ -25,7 +25,7 @@ from daemon_policy import (CONFIG, CONFIG_PATH, DB_PATH, MARKER, SECOND, MEMORY,
 from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
 
 KIND = "relay-public-scanner-daemon-subset-v1"
-CONTROL_COUNT = 30
+CONTROL_COUNT = 34
 
 
 def record(root, name, value):
@@ -148,7 +148,7 @@ def cases(candidate):
 
 
 def assess(root, profile):
-    with BoundedDaemon(root) as daemon:
+    with BoundedDaemon(root, private_containerd=True) as daemon:
         work = daemon.mount / "assessment"
         work.mkdir(mode=0o700)
         (work / "cache/tmp").mkdir(parents=True, mode=0o700)
