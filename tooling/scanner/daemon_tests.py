@@ -161,7 +161,7 @@ class DaemonControls(unittest.TestCase):
                 "123 <... execve resumed>) = 0\n" + opening + "\n").encode()
         self.assertTrue(policy.trace_witness(body, 123)["successful_read_open"])
         foreign_suffix = body.replace(b"123 <... execve resumed>", b"124 <... execve resumed>")
-        with self.assertRaisesRegex(Refusal, "trace-pair-unmatched"):
+        with self.assertRaisesRegex(Refusal, "trace-pair-pending-overwritten-or-interleaved"):
             policy.trace_witness(foreign_suffix, 123)
 
     def test_orphan_mismatched_duplicate_overwritten_and_unmatched_pairs_refuse(self):
