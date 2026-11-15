@@ -61,14 +61,16 @@ dependencies and uses the default Go build cache. Local qualification must copy
 only this small helper and the reviewed source inputs into official bounded
 scratch; it must not create a persistent runtime export or a second Go cache.
 
-The source pins name exact reviewed controller source
-`7f6500863f1f3c0cdcdd162e0cef1f512b87559d`. All fourteen pinned input blobs are
-byte-identical to controller source `edde9b7d5d3aaa3e4ac01f231dab25da9b0cf41f`,
-used by successful native deployment `run-20261115T091649ef7ca432`. This
-is parity of these fourteen source inputs; it does not claim that 7f or its
-other files are deployed. The native Relay selector still admits exactly
+The source pins name exact controller source
+`7f6500863f1f3c0cdcdd162e0cef1f512b87559d`, actually deployed by
+`run-20261115T124644b94ef065` at 12:49:25 UTC on 15 November 2026 and followed
+by four verified smoke checks. All fourteen pinned input blobs remain
+byte-identical to the earlier controller source
+`edde9b7d5d3aaa3e4ac01f231dab25da9b0cf41f`; that older deployment is
+historical provenance. The native Relay selector still admits exactly
 1.26.7/1.26.9/1.26.10 and refuses 1.26.11. Active public compilation remains
-independently fixed to Go 1.26.11.
+independently fixed to Go 1.26.11; controller deployment does not imply
+application deployment or native Go 1.26.11 admission.
 
 Final application S, private context P and public workflow G must be bound to
 their actual identities and fresh effective policy before qualification. These

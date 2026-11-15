@@ -37,8 +37,9 @@ def main():
     iid = directory / "final-image.id"
     archive = directory / "final-image.tar"
     image_id = None
-    with DockerSession() as docker:
-        try:
+    # The never-started binary reader must be removed before its image tag.
+    try:
+        with DockerSession() as docker:
             require_zero(["docker", "buildx", "build", "--load", "--iidfile", str(iid), "-t", tag,
                           "--build-arg", "PUBLIC_FLARE_RELEASE=" + release_origin,
                           "--label", "relay.ci.image.owner=" + owner,
@@ -63,17 +64,17 @@ def main():
                     raise RuntimeError("The exact image archive changed between scans")
             if compiler_inputs() != inputs:
                 raise RuntimeError("Production compiler inputs changed during image qualification")
-        finally:
-            inspected = subprocess.run(["docker", "image", "inspect", tag], env=clean_environment(),
-                                       text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-            if inspected.returncode:
-                if inspected.returncode != 1 or not ("No such " in inspected.stderr or "not found" in inspected.stderr):
-                    raise RuntimeError("Cannot verify this run's private image tag for cleanup")
-            else:
-                items = json.loads(inspected.stdout)
-                if len(items) != 1 or items[0]["Config"].get("Labels", {}).get("relay.ci.image.owner") != owner or (image_id is not None and items[0]["Id"] != image_id):
-                    raise RuntimeError("Private image tag changed; preserved for review")
-                require_zero(["docker", "image", "rm", tag], "final-image-tag-cleanup")
+    finally:
+        inspected = subprocess.run(["docker", "image", "inspect", tag], env=clean_environment(),
+                                   text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        if inspected.returncode:
+            if inspected.returncode != 1 or not ("No such " in inspected.stderr or "not found" in inspected.stderr):
+                raise RuntimeError("Cannot verify this run's private image tag for cleanup")
+        else:
+            items = json.loads(inspected.stdout)
+            if len(items) != 1 or items[0]["Config"].get("Labels", {}).get("relay.ci.image.owner") != owner or (image_id is not None and items[0]["Id"] != image_id):
+                raise RuntimeError("Private image tag changed; preserved for review")
+            require_zero(["docker", "image", "rm", tag], "final-image-tag-cleanup")
     # A success receipt is authoritative only after tag, scanner-container and
     # network cleanup has returned successfully; no passed report survives a refusal.
     write_report("image-summary", {"source_sha": sha, "origin_stage_commit": release_origin, "status": "passed", "image_id": image_id,

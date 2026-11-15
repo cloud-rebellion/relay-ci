@@ -160,6 +160,81 @@ class ReleaseRefusalTests(unittest.TestCase):
                         with self.assertRaises(RuntimeError): image.main()
                         report.assert_not_called()
 
+    def test_final_image_tag_cleanup_follows_owned_reader_cleanup(self):
+        # Real Docker refuses the last tag while a created reader references it.
+        # Simulate that dependency rather than letting every cleanup command pass.
+        for scan_failure, session_failure, tag_failure in [(False, False, False), (True, False, False),
+                                                           (False, True, False), (False, False, True)]:
+            with self.subTest(scan_failure=scan_failure, session_failure=session_failure, tag_failure=tag_failure), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                exact_id = "sha256:" + "a" * 64
+                owner = "f" * 32
+                state = {"reader_exists": False, "session_cleanup_attempted": False, "tag_removed": False}
+                events = []
+                self_outer = self
+                class FixtureDocker:
+                    def __enter__(self): return self
+                    def __exit__(self, *args):
+                        events.append("owned-reader-cleanup")
+                        state["session_cleanup_attempted"] = True
+                        if session_failure:
+                            raise RuntimeError("owned reader cleanup refused")
+                        state["reader_exists"] = False
+                        return False
+                    def pull(self, *args): return "sha256:" + "b" * 64
+                    def read_relay_binary(self, selected, output):
+                        self_outer.assertEqual(selected, exact_id)
+                        state["reader_exists"] = True
+                        output.write_bytes(b"fixed compiler-qualified binary")
+                        return {"go_version": "go1.26.11", "bytes": 30, "sha256": "e" * 64}
+                    def run(self, leaf, scanner, command, **kwargs):
+                        self_outer.assertTrue(state["reader_exists"])
+                        self_outer.assertEqual(command[command.index("--input") + 1], "/image.tar")
+                        self_outer.assertTrue(kwargs["mounts"][0][2])
+                        events.append(leaf)
+                        return (1 if scan_failure else 0), "fixture"
+                def command(argv, name, **kwargs):
+                    if name == "final-image-build":
+                        (root / "final-image.id").write_text(exact_id + "\n")
+                    elif name == "final-image-archive":
+                        (root / "final-image.tar").write_bytes(b"exact immutable archive")
+                    elif name == "final-image-tag-cleanup":
+                        events.append("owned-tag-cleanup")
+                        self.assertEqual(argv, ["docker", "image", "rm", "relay-ci:scan-" + owner])
+                        if state["reader_exists"]:
+                            raise RuntimeError("image is still referenced by the owned reader")
+                        if tag_failure:
+                            raise RuntimeError("owned tag removal refused")
+                        state["tag_removed"] = True
+                def report(*args):
+                    self.assertTrue(state["session_cleanup_attempted"])
+                    self.assertFalse(state["reader_exists"])
+                    self.assertTrue(state["tag_removed"])
+                    events.append("passed-summary")
+                inspected = subprocess.CompletedProcess([], 0, json.dumps([{"Id": exact_id, "Config": {
+                    "Labels": {"relay.ci.image.owner": owner}}}]), "")
+                with mock.patch.object(image, "require_ephemeral"), mock.patch.object(image, "compiler_inputs", return_value={}), \
+                        mock.patch.object(image, "source_sha", return_value="c" * 40), mock.patch.object(image, "origin_sha", return_value="d" * 40), \
+                        mock.patch.object(image, "output_directory", return_value=root), mock.patch.object(image, "DockerSession", FixtureDocker), \
+                        mock.patch.object(image, "require_zero", side_effect=command), mock.patch.object(image.subprocess, "run", return_value=inspected), \
+                        mock.patch.object(image.uuid, "uuid4", return_value=SimpleNamespace(hex=owner)), \
+                        mock.patch.object(image, "write_report", side_effect=report) as written:
+                    if scan_failure or session_failure or tag_failure:
+                        with self.assertRaises(RuntimeError): image.main()
+                        written.assert_not_called()
+                    else:
+                        image.main()
+                        written.assert_called_once()
+                        self.assertEqual(events[-3:], ["owned-reader-cleanup", "owned-tag-cleanup", "passed-summary"])
+                self.assertLess(events.index("owned-reader-cleanup"), events.index("owned-tag-cleanup"))
+                if session_failure:
+                    self.assertTrue(state["reader_exists"])
+                    self.assertFalse(state["tag_removed"])
+                elif not tag_failure:
+                    self.assertFalse(state["reader_exists"])
+                    self.assertTrue(state["tag_removed"])
+
     def binary_archive(self, names=("brightcrm",), kind=tarfile.REGTYPE, size=None):
         if size is not None and size > len(b"synthetic binary"):
             # Only the declared oversized header is needed: the reader must

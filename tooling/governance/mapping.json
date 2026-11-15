@@ -91,7 +91,7 @@
     "production rollback safety",
     "runtime or live invitation acceptance"
   ],
-  "source_role": "Exact reviewed 7f6500863f1f3c0cdcdd162e0cef1f512b87559d source-data provenance for fourteen private parser inputs. All fourteen input blobs are byte-identical to controller source edde9b7d5d3aaa3e4ac01f231dab25da9b0cf41f, used by successful native deployment run-20261115T091649ef7ca432. This input parity does not claim that 7f is deployed, that other 7f files are deployed, or that native Relay admits Go 1.26.11.",
+  "source_role": "Exact controller source-data provenance at 7f6500863f1f3c0cdcdd162e0cef1f512b87559d for fourteen private parser inputs. This controller source was actually deployed by run-20261115T124644b94ef065 at 2026-11-15T12:49:25Z, followed by four verified smoke checks. All fourteen input blobs remain byte-identical to historical controller source edde9b7d5d3aaa3e4ac01f231dab25da9b0cf41f. Controller deployment is not application deployment and does not admit native Relay Go 1.26.11.",
   "final_source_binding": "Final application S, private context P and public workflow G are independent exact bindings. Freeze their actual profile identities and fresh effective policy before qualification; retain complete C42 plus verifier E and full ops inputs. Fourteen-input deployed-source parity alone is not public CI, application, merge or deployment approval.",
   "active_compiler_profile": {
     "version": "go1.26.11",
