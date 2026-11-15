@@ -22,10 +22,10 @@ from profile import load
 from storage import BoundedDaemon, public_runner
 from daemon_policy import (CONFIG, CONFIG_PATH, DB_PATH, MARKER, SECOND, MEMORY, REFERENCE, SETTINGS,
                            config_witness, trace_witness, fresh_version, verdict, stream_chunks, resource_witness)
-from daemon_runtime import PrivateEgress, OwnedTrace, Candidate
+from daemon_runtime import PrivateEgress, OwnedTrace, Candidate, error_code
 
 KIND = "relay-public-scanner-daemon-subset-v1"
-CONTROL_COUNT = 22
+CONTROL_COUNT = 30
 
 
 def record(root, name, value):
@@ -76,30 +76,52 @@ def write_signature(candidate, second=False):
 
 
 def witness(candidate, trace, results, phase):
-    info = candidate.inspect()
-    top = candidate.d.docker(["top", candidate.cid, "-eo", "pid,comm"]).stdout.decode().splitlines()
-    rows = [x.split() for x in top[1:]]
-    pids = [int(x[0]) for x in rows if len(x) == 2 and x[0].isdecimal() and x[1] == "clamd"]
-    require(len(pids) == 1, "actual-clamd-process-not-unique")
-    traced = trace_witness(trace.snapshot(), pids[0])
-    before = candidate.execute(["cat", CONFIG_PATH])
-    parsed = candidate.execute(["clamconf", "--config-dir=/etc/clamav"])
-    require(candidate.execute(["cat", CONFIG_PATH]) == before, "config-changed-during-parser-witness")
-    settings = config_witness(before, parsed)
-    version = fresh_version(candidate.exchange([b"zVERSION\x00"]), dt.datetime.now(dt.timezone.utc))
-    resources = resource_witness(candidate.resources())
-    # Full actual inherited scripts/config/parser output is encrypted, not logged.
-    entrypoint = candidate.execute(["cat", "/init"])
-    require(0 < len(entrypoint) <= 256 << 10, "actual-entrypoint-witness-bound")
-    (results / (phase + "-init.stdout")).write_bytes(entrypoint)
-    (results / (phase + "-clamd-config.stdout")).write_bytes(before)
-    (results / (phase + "-clamconf.stdout")).write_bytes(parsed)
-    record(results, phase + "-witness", {"image_config": CONFIG, "container_id": candidate.cid,
-        "inherited_startup_verified": True, "entrypoint_sha256": hashlib.sha256(entrypoint).hexdigest(),
-        "trace": traced, "configuration": settings, "loaded_signatures": version, "resources": resources,
-        "container_oom_killed": info["State"].get("OOMKilled", False)})
-    return {"phase": phase, "loaded_settings": len(settings["loaded_settings"]), "freshness": version,
-            "resources": resources, "identical_duplicates": settings["identical_duplicates"]}
+    # Diagnostic bytes are captured before strict parsing. Presence alone never qualifies a loaded config.
+    diagnostics = {"status": "captured-not-qualified", "container_id": candidate.cid, "phase": phase}
+    try:
+        info = candidate.inspect()
+        diagnostics["container"] = {"id": info["Id"], "image": info["Image"], "state": info["State"]}
+        top = candidate.d.docker(["top", candidate.cid, "-eo", "pid,comm"]).stdout
+        require(0 < len(top) <= 64 << 10, "actual-clamd-top-bound")
+        (results / (phase + "-docker-top.stdout")).write_bytes(top)
+        rows = [x.split() for x in top.decode().splitlines()[1:]]
+        pids = [int(x[0]) for x in rows if len(x) == 2 and x[0].isdecimal() and x[1] == "clamd"]
+        require(len(pids) == 1, "actual-clamd-process-not-unique")
+        diagnostics["actual_clamd_process"] = candidate.process_metadata(pids[0])
+        captures = {}
+        for name, command, limit in (
+            ("init", ["cat", "/init"], 256 << 10),
+            ("clamd-config", ["cat", CONFIG_PATH], 256 << 10),
+            ("clamd-config-stat", ["stat", "-c", "%d:%i:%u:%g:%a:%s:%Y:%Z", CONFIG_PATH], 4096),
+            ("clamconf", ["clamconf", "--config-dir=/etc/clamav"], 1 << 20)):
+            candidate.inspect()
+            output = candidate.d.docker(["exec", candidate.cid, *command], allow_failure=True)
+            require(len(output.stdout) + len(output.stderr) <= limit, "actual-diagnostic-capture-bound")
+            for suffix in ("stdout", "stderr"):
+                (results / (phase + "-" + name + "." + suffix)).write_bytes(getattr(output, suffix))
+            captures[name] = output
+            diagnostics[name] = {"exit_code": output.returncode, "stdout_bytes": len(output.stdout),
+                                 "stdout_sha256": hashlib.sha256(output.stdout).hexdigest()}
+        record(results, phase + "-diagnostic-capture", diagnostics)
+        require(all(value.returncode == 0 for value in captures.values()), "actual-diagnostic-command-failed")
+        entrypoint, before, parsed = (captures[name].stdout for name in ("init", "clamd-config", "clamconf"))
+        require(entrypoint and before and parsed, "actual-diagnostic-capture-empty")
+        # Existing acceptance is deliberately unchanged: exact clamd PID exec AND successful read-open.
+        traced = trace_witness(trace.snapshot(), pids[0])
+        require(candidate.execute(["cat", CONFIG_PATH]) == before, "config-changed-during-parser-witness")
+        settings = config_witness(before, parsed)
+        version = fresh_version(candidate.exchange([b"zVERSION\x00"]), dt.datetime.now(dt.timezone.utc))
+        resources = resource_witness(candidate.resources())
+        record(results, phase + "-witness", {"image_config": CONFIG, "container_id": candidate.cid,
+            "inherited_startup_verified": True, "entrypoint_sha256": hashlib.sha256(entrypoint).hexdigest(),
+            "trace": traced, "configuration": settings, "loaded_signatures": version, "resources": resources,
+            "container_oom_killed": info["State"].get("OOMKilled", False)})
+        return {"phase": phase, "loaded_settings": len(settings["loaded_settings"]), "freshness": version,
+                "resources": resources, "identical_duplicates": settings["identical_duplicates"]}
+    except BaseException as error:
+        diagnostics.update(status="failed-not-qualified", primary_error=error_code(error))
+        record(results, phase + "-diagnostic-capture", diagnostics)
+        raise
 
 
 def cases(candidate):

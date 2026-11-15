@@ -1,5 +1,6 @@
 """Phase1-only owned bridge/tracer/container. Qualified storage.py is unchanged."""
 from contextlib import AbstractContextManager
+import hashlib
 import ipaddress
 import json
 import os
@@ -11,6 +12,127 @@ import time
 
 from daemon_policy import CONFIG, CONFIG_PATH, DB_PATH, MEMORY, REFERENCE, SETTINGS, SUBNET
 from registry import require, Refusal
+
+
+PROCESS_PROBE = r'''
+import json, os, pathlib, stat, sys
+
+def bounded(path, maximum=16384):
+    with open(path, 'rb') as handle:
+        body = handle.read(maximum + 1)
+    assert len(body) <= maximum
+    return body
+
+def identity(pid, full=False, required=None, candidate=False):
+    path = pathlib.Path('/proc') / str(pid)
+    raw = bounded(path / 'stat').decode()
+    assert raw.split('(', 1)[0].strip() == str(pid)
+    fields = raw.rsplit(')', 1)[1].split()
+    start = fields[19]
+    assert start.isdecimal() and int(start) > 0
+    result = {'status': 'present', 'pid': pid, 'start_ticks': start, 'state': fields[0], 'ppid': int(fields[1])}
+    if required is not None:
+        rows = bounded(path / 'cgroup').decode().splitlines()
+        groups = [row[3:] for row in rows if row.startswith('0::')]
+        assert len(groups) == 1
+        group = groups[0]
+        assert (required in group if candidate else group == required or group.startswith(required + '/'))
+        result['cgroup'] = group
+    if full:
+        status = dict(line.split(':', 1) for line in bounded(path / 'status').decode().splitlines() if ':' in line)
+        result.update(cmdline=bounded(path / 'cmdline', 8192).decode('utf-8', 'replace').split('\0')[:-1],
+                      exe=os.readlink(path / 'exe'), nspid=[int(x) for x in status['NSpid'].split()],
+                      tracer_pid=int(status['TracerPid']))
+        assert len(result['exe'].encode()) <= 8192 and result['nspid']
+        details = os.stat(path / 'exe')
+        result['exe_metadata'] = {'dev': details.st_dev, 'ino': details.st_ino, 'uid': details.st_uid,
+                                  'gid': details.st_gid, 'mode': stat.S_IMODE(details.st_mode), 'bytes': details.st_size}
+    assert bounded(path / 'stat').decode().rsplit(')', 1)[1].split()[19] == start
+    return result
+
+mode = sys.argv[1]
+if mode == 'settled':
+    pid = int(sys.argv[2]); assert pid > 1
+    try:
+        result = identity(pid)
+    except FileNotFoundError:
+        result = {'status': 'absent', 'pid': pid}
+elif mode in ('identity', 'candidate'):
+    pid = int(sys.argv[2]); required = sys.argv[3]; assert pid > 1
+    if mode == 'candidate':
+        assert len(required) == 64 and all(c in '0123456789abcdef' for c in required)
+    else:
+        assert required.startswith('/system.slice/relay-scanner-') and required.endswith('-trace.service')
+    result = identity(pid, full=True, required=required, candidate=mode == 'candidate')
+elif mode == 'tree':
+    group = sys.argv[2]
+    assert group.startswith('/system.slice/relay-scanner-') and group.endswith('.service')
+    assert '..' not in group.split('/')
+    root = pathlib.Path('/sys/fs/cgroup') / group.lstrip('/')
+    assert root.resolve() == root and root.is_dir()
+    directories, pids, pending = [], set(), [root]
+    while pending:
+        directory = pending.pop()
+        assert directory.resolve() == directory and not directory.is_symlink()
+        assert len(directory.relative_to(root).parts) <= 8
+        directories.append('/' + directory.relative_to(pathlib.Path('/sys/fs/cgroup')).as_posix())
+        assert len(directories) <= 64
+        values = bounded(directory / 'cgroup.procs').split()
+        assert all(value.isdigit() and int(value) > 1 for value in values)
+        pids.update(int(value) for value in values); assert len(pids) <= 32
+        for child in directory.iterdir():
+            assert not child.is_symlink()
+            if child.is_dir():
+                pending.append(child)
+    rows, total = [], 0
+    for pid in sorted(pids):
+        row = identity(pid, required=group)
+        tasks = sorted((pathlib.Path('/proc') / str(pid) / 'task').iterdir())
+        total += len(tasks); assert 0 < len(tasks) and total <= 512
+        threads = []
+        for task in tasks:
+            status = dict(line.split(':', 1) for line in bounded(task / 'status').decode().splitlines() if ':' in line)
+            threads.append({'tid': int(task.name), 'tracer_pid': int(status['TracerPid'])})
+        row['threads'] = threads; rows.append(row)
+    result = {'cgroup': group, 'directories': sorted(directories), 'processes': rows}
+else:
+    raise AssertionError('unsupported finite probe')
+print(json.dumps(result, sort_keys=True))
+'''
+
+
+def owned_inventory(value, group, main):
+    require(isinstance(value, dict) and value.get("cgroup") == group, "owned-trace-inventory-root")
+    directories, rows = value.get("directories"), value.get("processes")
+    require(isinstance(directories, list) and 0 < len(directories) <= 64 and len(set(directories)) == len(directories)
+            and group in directories and all(isinstance(path, str) and ".." not in path.split("/") and
+                (path == group or path.startswith(group + "/")) for path in directories), "owned-trace-inventory-escape")
+    require(isinstance(rows, list) and 0 < len(rows) <= 32, "owned-trace-service-pids")
+    pids, threads = set(), []
+    for row in rows:
+        pid = row.get("pid")
+        require(type(pid) is int and pid > 1 and pid not in pids and row.get("status") == "present"
+                and isinstance(row.get("start_ticks"), str) and row["start_ticks"].isdecimal()
+                and row.get("cgroup") in directories, "owned-trace-process-ownership")
+        pids.add(pid)
+        values = row.get("threads")
+        require(isinstance(values, list) and values and all(type(item.get("tid")) is int and item["tid"] > 1
+                and type(item.get("tracer_pid")) is int and item["tracer_pid"] >= 0 for item in values),
+                "owned-trace-thread-inventory")
+        threads.extend(values)
+    require(main in pids and 0 < len(threads) <= 512 and len({x["tid"] for x in threads}) == len(threads),
+            "owned-trace-thread-bound")
+    return sorted(pids), threads
+
+
+def prior_process_settled(value, pid, start):
+    require(isinstance(value, dict) and value.get("pid") == pid, "owned-trace-process-readback")
+    if value.get("status") == "absent":
+        return "absent"
+    require(value.get("status") == "present" and isinstance(value.get("start_ticks"), str)
+            and value["start_ticks"].isdecimal(), "owned-trace-process-unknown")
+    require(value["start_ticks"] != start, "owned-trace-prior-process-still-present")
+    return "pid-reused-prior-process-absent"
 
 
 def rule_identity(tokens):
@@ -133,68 +255,151 @@ class PrivateEgress(AbstractContextManager):
         return False
 
 
+def error_code(error):
+    value = str(error) if isinstance(error, Refusal) else type(error).__name__
+    return value if re.fullmatch(r"[A-Za-z0-9-]{1,120}", value) else "details-withheld"
+
+
 class OwnedTrace(AbstractContextManager):
-    """Trace only the owned service tree before container creation, capped8MiB."""
+    """Finite owned service subtree only; active identity and retired proof differ."""
     def __init__(self, daemon):
         self.d = daemon
         self.unit = daemon.unit + "-trace"
         self.path = daemon.mount / "clamd-config.trace"
         self.attempted = False
+        self.stop_attempted = False
+        self.prior = None
+        self.cleanup_error = None
+
+    def _record(self, value):
+        raw = json.dumps(value, sort_keys=True, indent=2).encode() + b"\n"
+        require(len(raw) <= 64 << 10, "owned-trace-cleanup-receipt-bound")
+        (self.d.results / "owned-trace-cleanup.json").write_bytes(raw)
+
+    def probe(self, mode, *arguments):
+        result = self.d.command(["sudo", "-n", "python3", "-c", PROCESS_PROBE, mode, *map(str, arguments)])
+        require(result.returncode == 0 and 0 < len(result.stdout) <= 2 << 20, "owned-process-probe-bound")
+        return json.loads(result.stdout)
+
+    def _raw_state(self):
+        properties = "LoadState,ActiveState,MainPID,ControlPID,ExecStart,ControlGroup,InvocationID"
+        result = self.d.command(["sudo", "-n", "systemctl", "show", "--all", self.unit,
+                                 "--property=" + properties])
+        require(result.returncode == 0 and len(result.stdout) <= 64 << 10, "owned-trace-state-unknown")
+        rows = [line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line]
+        require(len(rows) == len({row[0] for row in rows}) and
+                {row[0] for row in rows} == set(properties.split(",")), "owned-trace-state-shape")
+        return dict(rows)
+
+    def _active(self, value):
+        require(value.get("LoadState") == "loaded" and value.get("ActiveState") == "active"
+                and value.get("ControlPID") == "0" and value.get("MainPID", "").isdecimal()
+                and int(value["MainPID"]) > 1 and str(self.path) in value.get("ExecStart", "")
+                and "strace" in value["ExecStart"]
+                and value.get("ControlGroup") == "/system.slice/" + self.unit + ".service"
+                and re.fullmatch(r"[0-9a-f]{32}", value.get("InvocationID", "")), "owned-trace-unit-identity")
+        if self.prior is not None:
+            require(all(value[key] == self.prior[key] for key in ("MainPID", "ExecStart", "ControlGroup", "InvocationID")),
+                    "owned-trace-active-generation-changed")
+        process = self.probe("identity", value["MainPID"], value["ControlGroup"])
+        require(process.get("pid") == int(value["MainPID"]) and process.get("status") == "present"
+                and isinstance(process.get("start_ticks"), str) and process["start_ticks"].isdecimal()
+                and process.get("exe", "").endswith("/strace")
+                and str(self.path) in process.get("cmdline", []), "owned-trace-process-identity")
+        identity = {key: value[key] for key in ("MainPID", "ExecStart", "ControlGroup", "InvocationID")}
+        identity["start_ticks"] = process["start_ticks"]
+        if self.prior is None:
+            self.prior = identity
+        require(identity == self.prior, "owned-trace-active-generation-changed")
+        return value
 
     def state(self):
-        result = self.d.command(["sudo", "-n", "systemctl", "show", self.unit,
-            "--property=ActiveState,MainPID,ExecStart,ControlGroup"])
-        value = dict(x.split("=", 1) for x in result.stdout.decode().splitlines() if "=" in x)
-        require(str(self.path) in value.get("ExecStart", "") and "strace" in value["ExecStart"]
-                and value.get("ControlGroup", "").endswith("/" + self.unit + ".service"),
-                "owned-trace-unit-identity")
-        return value
+        return self._active(self._raw_state())
+
+    def inventory(self, main):
+        group = "/system.slice/" + self.d.unit + ".service"
+        value = self.probe("tree", group)
+        pids, threads = owned_inventory(value, group, main)
+        return value, pids, threads
 
     def __enter__(self):
         main = self.d.verify_unit()
-        # The unit owns dockerd and its private containerd. Existing children
-        # must be attached too; future clamd children are followed by strace-f.
-        result = self.d.command(["sudo", "-n", "cat", "/sys/fs/cgroup/system.slice/" + self.d.unit + ".service/cgroup.procs"])
-        pids = [int(x) for x in result.stdout.split() if x.isdigit()]
-        require(main in pids and 1 <= len(pids) <= 32 and all(x > 1 for x in pids), "owned-trace-service-pids")
+        initial, pids, _ = self.inventory(main)
+        (self.d.results / "owned-trace-initial-inventory.json").write_text(json.dumps(initial, sort_keys=True) + "\n")
         self.d.command(["strace", "--version"])
         self.attempted = True
-        self.d.command(["sudo", "-n", "systemd-run", "--unit=" + self.unit,
-            "--property=MemoryMax=256M", "--property=CPUQuota=100%", "--property=TasksMax=128",
-            "--property=RuntimeMaxSec=6600", "--property=LimitFSIZE=8388608",
-            "--property=KillMode=control-group", "--property=TimeoutStopSec=10",
-            "strace", "-f", "-s", "4096", "-e", "trace=openat,openat2,execve", "-o", str(self.path),
-            *[part for pid in pids for part in ("-p", str(pid))]])
-        # systemd-active alone is insufficient: prove every current thread in
-        # the captured owned service processes is already traced before create.
-        probe = ("import json,pathlib,sys; rows=[]; "
-                 "pids=[int(x) for x in sys.argv[1:]]; "
-                 "tasks=[p for n in pids for p in pathlib.Path('/proc/'+str(n)+'/task').glob('*/status')]; "
-                 "assert 0<len(tasks)<=512; "
-                 "rows=[int(next(x.split(':',1)[1] for x in p.read_text().splitlines() if x.startswith('TracerPid:'))) for p in tasks]; "
-                 "print(json.dumps(rows))")
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            state = self.state()
-            require(state.get("ActiveState") == "active" and state.get("MainPID", "0").isdecimal(), "owned-trace-not-active")
-            values = json.loads(self.d.command(["sudo", "-n", "python3", "-c", probe, *map(str, pids)]).stdout)
-            if values and all(type(x) is int and x == int(state["MainPID"]) > 1 for x in values):
-                return self
-            time.sleep(0.2)
-        raise Refusal("owned-trace-attachment-not-proven")
+        try:
+            self.d.command(["sudo", "-n", "systemd-run", "--unit=" + self.unit,
+                "--property=MemoryMax=256M", "--property=CPUQuota=100%", "--property=TasksMax=128",
+                "--property=RuntimeMaxSec=6600", "--property=LimitFSIZE=8388608",
+                "--property=KillMode=control-group", "--property=TimeoutStopSec=10",
+                "strace", "-f", "-s", "4096", "-e",
+                "trace=openat,openat2,execve,execveat,clone,clone3,fork,vfork", "-o", str(self.path),
+                *[part for pid in pids for part in ("-p", str(pid))]])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                state = self.state()
+                current, _, threads = self.inventory(self.d.verify_unit())
+                if all(item["tracer_pid"] == int(state["MainPID"]) for item in threads):
+                    (self.d.results / "owned-trace-attached-inventory.json").write_text(json.dumps(current, sort_keys=True) + "\n")
+                    return self
+                time.sleep(0.2)
+            raise Refusal("owned-trace-attachment-not-proven")
+        except BaseException as primary:
+            self.__exit__(type(primary), primary, primary.__traceback__)
+            raise
 
     def snapshot(self):
-        require(self.state().get("ActiveState") == "active", "owned-trace-stopped-before-witness")
+        self.state()
         value = self.d.command(["sudo", "-n", "cat", str(self.path)]).stdout
         require(0 < len(value) < 8 << 20, "owned-trace-exhausted-or-empty")
         return value
 
-    def __exit__(self, *_):
-        if self.attempted:
-            self.state()
-            self.d.command(["sudo", "-n", "systemctl", "stop", self.unit])
-            require(self.state().get("ActiveState") != "active", "owned-trace-not-settled")
-        return False
+    def _settle(self):
+        require(self.prior is not None, "owned-trace-no-verified-prior-identity")
+        value = self._raw_state()
+        stop_error = None
+        if value.get("ActiveState") == "active":
+            self._active(value)  # Never stop a replacement or foreign active unit.
+            require(not self.stop_attempted, "owned-trace-stop-already-attempted-no-repeat")
+            self.stop_attempted = True
+            try:
+                self.d.command(["sudo", "-n", "systemctl", "stop", self.unit])
+            except BaseException as error:
+                stop_error = error_code(error)
+            value = self._raw_state()  # Successful readback, not stop acknowledgement, proves settlement.
+        require(value.get("LoadState") in {"loaded", "not-found"} and value.get("ActiveState") == "inactive"
+                and value.get("MainPID") == "0" and value.get("ControlPID") == "0",
+                "owned-trace-not-settled")
+        for key in ("ExecStart", "ControlGroup", "InvocationID"):
+            require(value.get(key) in {"", self.prior[key]}, "owned-trace-retired-identity-changed")
+        process = self.probe("settled", self.prior["MainPID"])
+        absence = prior_process_settled(process, int(self.prior["MainPID"]), self.prior["start_ticks"])
+        # Retain final flushed trace for diagnostics only. It never revises a failed witness verdict.
+        final = self.d.command(["sudo", "-n", "cat", str(self.path)]).stdout
+        require(0 < len(final) < 8 << 20, "owned-trace-final-exhausted-or-empty")
+        (self.d.results / "actual-clamd-config-trace-poststop.stdout").write_bytes(final)
+        return {"settled": True, "state": value, "prior_identity": self.prior,
+                "prior_process": absence, "stop_attempted": self.stop_attempted,
+                "stop_response_error": stop_error, "final_trace_sha256": hashlib.sha256(final).hexdigest(),
+                "final_trace_bytes": len(final), "final_trace_changes_witness_verdict": False}
+
+    def __exit__(self, exc_type, primary, traceback):
+        if not self.attempted:
+            return False
+        value = {"schema": 1, "settled": False, "primary_error": error_code(primary) if primary else None}
+        try:
+            value.update(self._settle())
+        except BaseException as error:
+            self.cleanup_error = error
+            value["cleanup_error"] = error_code(error)
+        try:
+            self._record(value)
+        except BaseException as error:
+            self.cleanup_error = self.cleanup_error or error
+        if self.cleanup_error is not None and primary is None:
+            raise self.cleanup_error
+        return False  # An existing primary error always propagates without cleanup masking it.
 
 
 class Candidate(AbstractContextManager):
@@ -318,6 +523,16 @@ class Candidate(AbstractContextManager):
     def execute(self, args, timeout=60):
         self.inspect()
         return self.d.docker(["exec", self.cid, *args], timeout=timeout).stdout
+
+    def process_metadata(self, pid):
+        self.inspect()
+        require(type(pid) is int and pid > 1, "candidate-diagnostic-pid")
+        result = self.d.command(["sudo", "-n", "python3", "-c", PROCESS_PROBE, "candidate", str(pid), self.cid])
+        require(result.returncode == 0 and 0 < len(result.stdout) <= 64 << 10, "candidate-process-metadata-bound")
+        value = json.loads(result.stdout)
+        require(value.get("pid") == pid and value.get("status") == "present"
+                and self.cid in value.get("cgroup", ""), "candidate-process-metadata-identity")
+        return value
 
     def resources(self):
         info = self.inspect()
